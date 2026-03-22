@@ -1,4 +1,5 @@
 .godot/
+.tools/
 *.translation
 export/
 build/
