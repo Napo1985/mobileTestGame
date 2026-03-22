@@ -1,0 +1,25 @@
+{
+  "skins": [
+    {
+      "id": "default",
+      "display_name": "Classic",
+      "player_fill": "#f3d633",
+      "player_outline": "#38290a",
+      "unlock": { "type": "default" }
+    },
+    {
+      "id": "frog_green",
+      "display_name": "Green Frog",
+      "player_fill": "#44cc66",
+      "player_outline": "#1a5c2e",
+      "unlock": { "type": "coins", "cost": 50 }
+    },
+    {
+      "id": "ember",
+      "display_name": "Ember",
+      "player_fill": "#ff6b35",
+      "player_outline": "#4a1508",
+      "unlock": { "type": "coins", "cost": 120 }
+    }
+  ]
+}

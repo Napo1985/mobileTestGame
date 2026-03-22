@@ -15,6 +15,10 @@ signal coins_changed(total: int)
 
 var _spawner := RowSpawner.new()
 var _game_over: bool = false
+var _buff_manager := BuffManager.new()
+var _ability_registry := AbilityRegistry.new()
+var _ability_rng := RandomNumberGenerator.new()
+var _ability_context: AbilityContext
 
 
 func _ready() -> void:
@@ -23,7 +27,10 @@ func _ready() -> void:
 	var cfg: GameConfig = game_config
 	if cfg == null:
 		cfg = Game.get_game_config()
-	grid.setup(_spawner, grass_row, cfg)
+	_register_abilities()
+	_ability_rng.randomize()
+	_ability_context = AbilityContext.new(self, grid, _buff_manager, _ability_rng)
+	grid.setup(_spawner, grass_row, cfg, _buff_manager)
 	grid.scored.connect(_on_scored)
 	grid.died.connect(_on_died)
 	grid.chest_collected.connect(_on_chest_collected)
@@ -31,6 +38,30 @@ func _ready() -> void:
 	player_input.setup(self)
 	score_changed.emit(grid.get_score())
 	coins_changed.emit(ProfileService.get_coins())
+	SkinApplicator.apply_equipped_to_grid(grid)
+
+
+func get_buff_manager() -> BuffManager:
+	return _buff_manager
+
+
+func request_ability(ability_id: StringName) -> void:
+	if _game_over:
+		return
+	var ab: Ability = _ability_registry.get_ability(ability_id)
+	if ab and _ability_context:
+		ab.activate(_ability_context)
+
+
+func _register_abilities() -> void:
+	_ability_registry.register(ShieldAbility.new())
+	_ability_registry.register(JumpAbility.new())
+	_ability_registry.register(MissileAbility.new())
+	_ability_registry.register(FastPaceAbility.new())
+
+
+func _apply_equipped_skin_to_grid() -> void:
+	SkinApplicator.apply_equipped_to_grid(grid)
 
 
 func is_game_over() -> bool:
@@ -47,6 +78,7 @@ func restart_run() -> void:
 	_game_over = false
 	game_over_changed.emit(false)
 	grid.reset_run()
+	SkinApplicator.apply_equipped_to_grid(grid)
 	score_changed.emit(grid.get_score())
 
 
@@ -58,6 +90,7 @@ func _on_died() -> void:
 	if _game_over:
 		return
 	_game_over = true
+	PlayGamesService.on_run_ended_with_score(grid.get_score())
 	game_over_changed.emit(true)
 
 

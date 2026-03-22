@@ -1,0 +1,6 @@
+Build the Android library from `android/plugins/PlayGamesBridge/` (see docs/PLAY_GAMES.md) and copy the outputs here:
+
+- PlayGamesBridge-debug.aar
+- PlayGamesBridge-release.aar
+
+If these files are missing, exports still succeed; the Godot singleton will not be registered until an AAR is packaged.

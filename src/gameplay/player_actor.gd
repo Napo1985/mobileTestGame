@@ -34,6 +34,8 @@ func forward_input(event: InputEvent) -> void:
 				_has_press = false
 	elif event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
+			KEY_Q:
+				_run.request_ability(&"shield")
 			KEY_UP, KEY_W:
 				_run.request_move(Vector2i(0, 1))
 			KEY_DOWN, KEY_S:

@@ -15,3 +15,7 @@ func go_to_main_menu() -> void:
 
 func go_to_run() -> void:
 	get_tree().change_scene_to_file("res://scenes/gameplay/run_root.tscn")
+
+
+func go_to_settings_skins() -> void:
+	get_tree().change_scene_to_file("res://src/ui/settings_skins.tscn")

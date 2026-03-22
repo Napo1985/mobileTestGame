@@ -11,11 +11,15 @@ run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.3", "Forward Plus")
 config/icon="res://icon.svg"
 
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/play_games_bridge/plugin.cfg")
+
 [autoload]
 
 Game="*res://src/autoload/game.gd"
-ProfileService="*res://src/autoload/profile_service.gd"
 PlayGamesService="*res://src/autoload/play_games_service.gd"
+ProfileService="*res://src/autoload/profile_service.gd"
 EventBus="*res://src/autoload/event_bus.gd"
 
 [display]

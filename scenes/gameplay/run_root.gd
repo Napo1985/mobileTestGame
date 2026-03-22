@@ -7,6 +7,7 @@ extends Control
 @onready var _game_over: Control = $CanvasLayer/GameOver
 @onready var _restart: Button = $CanvasLayer/GameOver/Center/Panel/VBox/RestartButton
 @onready var _back: Button = $CanvasLayer/HUD/VBox/BackButton
+@onready var _shield: Button = $CanvasLayer/HUD/VBox/ShieldButton
 
 
 func _ready() -> void:
@@ -38,6 +39,10 @@ func _on_restart_pressed() -> void:
 
 func _on_back_pressed() -> void:
 	Game.go_to_main_menu()
+
+
+func _on_shield_pressed() -> void:
+	_controller.request_ability(&"shield")
 
 
 func _input(event: InputEvent) -> void:

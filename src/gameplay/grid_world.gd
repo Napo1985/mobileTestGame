@@ -6,6 +6,7 @@ signal scored(new_total: int)
 signal died
 signal state_changed
 signal chest_collected(coins: int)
+signal shield_absorbed
 
 const GRID_COLS := 5
 const AHEAD_BUFFER := 10
@@ -16,6 +17,10 @@ const BEHIND_KEEP := 5
 var _spawner: RowSpawner
 var _grass: RowDefinition
 var _game_config: GameConfig
+var _buff_manager: BuffManager
+
+var player_fill_color: Color = Color(0.95, 0.84, 0.2, 1.0)
+var player_outline_color: Color = Color(0.22, 0.16, 0.04, 1.0)
 
 ## int -> RowRuntime
 var _rows: Dictionary = {}
@@ -42,13 +47,28 @@ class RowRuntime:
 	var chest_lane: int = -1
 
 
-func setup(spawner: RowSpawner, grass_row: RowDefinition, game_config: GameConfig = null) -> void:
+func setup(
+		spawner: RowSpawner,
+		grass_row: RowDefinition,
+		game_config: GameConfig = null,
+		buff_manager: BuffManager = null,
+) -> void:
 	_spawner = spawner
 	_grass = grass_row
 	_game_config = game_config
+	_buff_manager = buff_manager
+	if _buff_manager:
+		if not _buff_manager.shield_changed.is_connected(_on_buff_shield_changed):
+			_buff_manager.shield_changed.connect(_on_buff_shield_changed)
+
+
+func _on_buff_shield_changed(_active: bool) -> void:
+	queue_redraw()
 
 
 func reset_run() -> void:
+	if _buff_manager:
+		_buff_manager.reset_for_new_run()
 	_rows.clear()
 	_dead = false
 	set_process(true)
@@ -114,8 +134,9 @@ func try_move(dir: Vector2i) -> bool:
 	_try_collect_chest()
 
 	if _is_car_collision():
-		_emit_death_once()
+		_handle_fatal_collision()
 		state_changed.emit()
+		queue_redraw()
 		return true
 
 	state_changed.emit()
@@ -128,8 +149,17 @@ func _process(delta: float) -> void:
 	_time_sec += delta
 	# Moving cars: refresh death if standing on road (stay off timing windows).
 	if is_road_cell(_player_row_id) and _is_car_collision():
-		_emit_death_once()
+		_handle_fatal_collision()
 	queue_redraw()
+
+
+func _handle_fatal_collision() -> void:
+	if _dead:
+		return
+	if _buff_manager and _buff_manager.try_absorb_fatal_hit():
+		shield_absorbed.emit()
+		return
+	_emit_death_once()
 
 
 func _emit_death_once() -> void:
@@ -180,8 +210,10 @@ func _draw_player(cs: float) -> void:
 	var px := (float(_player_lane) + 0.5) * cs
 	var py := cs * 0.5
 	var r := cs * 0.26
-	draw_circle(Vector2(px, py), r, Color(0.95, 0.84, 0.2, 1))
-	draw_arc(Vector2(px, py), r, 0.0, TAU, 32, Color(0.22, 0.16, 0.04, 1), 3.0, true)
+	draw_circle(Vector2(px, py), r, player_fill_color)
+	draw_arc(Vector2(px, py), r, 0.0, TAU, 32, player_outline_color, 3.0, true)
+	if _buff_manager and _buff_manager.has_active_shield():
+		draw_arc(Vector2(px, py), r + cs * 0.06, 0.0, TAU, 48, Color(0.35, 0.75, 1.0, 0.95), 4.0, true)
 
 
 func _draw_cars(rt: RowRuntime, y: float, cs: float, W: float) -> void:

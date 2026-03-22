@@ -64,11 +64,16 @@ theme_override_colors/font_color = Color(0.92, 0.82, 0.35, 1)
 theme_override_font_sizes/font_size = 22
 text = "Coins: 0"
 
+[node name="ShieldButton" type="Button" parent="CanvasLayer/HUD/VBox"]
+custom_minimum_size = Vector2(200, 44)
+layout_mode = 2
+text = "Shield (test)"
+
 [node name="HintLabel" type="Label" parent="CanvasLayer/HUD/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.78, 0.7, 1)
 theme_override_font_sizes/font_size = 16
-text = "Tap/swipe: forward, strafe, back. Keys: WASD / arrows."
+text = "Tap/swipe: forward, strafe, back. Keys: WASD / arrows, Q = shield."
 autowrap_mode = 3
 
 [node name="BackButton" type="Button" parent="CanvasLayer/HUD/VBox"]
@@ -122,3 +127,4 @@ layout_mode = 2
 text = "Restart"
 
 [connection signal="pressed" from="CanvasLayer/HUD/VBox/BackButton" to="." method="_on_back_pressed"]
+[connection signal="pressed" from="CanvasLayer/HUD/VBox/ShieldButton" to="." method="_on_shield_pressed"]
