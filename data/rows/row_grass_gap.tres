@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="RowDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/content/resources/row_definition.gd" id="1_rd"]
+
+[resource]
+script = ExtResource("1_rd")
+row_name = "grass_meadow"
+kind = 0
+safe_color = Color(0.34, 0.58, 0.32, 1)
+road_color = Color(0.2, 0.2, 0.23, 1)
+car_lane_bits = 0
+car_speed = 120.0
+car_direction = 1
