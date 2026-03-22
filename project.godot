@@ -13,7 +13,7 @@ config/icon="res://icon.svg"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/play_games_bridge/plugin.cfg")
+enabled=PackedStringArray("res://addons/play_games_bridge/plugin.cfg", "res://addons/gut/plugin.cfg")
 
 [autoload]
 

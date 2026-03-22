@@ -1,0 +1,24 @@
+# Optional: run GUT headless on pushes and PRs. Requires network to download Godot.
+name: GUT
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  gut:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot 4.3
+        run: |
+          curl -sLO https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip
+          unzip -q Godot_v4.3-stable_linux.x86_64.zip
+          chmod +x Godot_v4.3-stable_linux.x86_64
+          sudo mv Godot_v4.3-stable_linux.x86_64 /usr/local/bin/godot
+
+      - name: Run GUT
+        working-directory: ${{ github.workspace }}
+        run: godot --path . --headless -s res://addons/gut/gut_cmdln.gd
