@@ -4,4 +4,3 @@
 export/
 build/
 android/build/
-addons/play_games_bridge/bin/*.aar
