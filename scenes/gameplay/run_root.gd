@@ -14,8 +14,12 @@ func _ready() -> void:
 	_controller.score_changed.connect(_on_score_changed)
 	_controller.coins_changed.connect(_on_coins_changed)
 	_controller.game_over_changed.connect(_on_game_over_changed)
-	_restart.pressed.connect(_on_restart_pressed)
-	_back.pressed.connect(_on_back_pressed)
+	# The scene file (`run_root.tscn`) may already connect these signals.
+	# Guard to avoid duplicate connections across reloads / editor behavior.
+	if not _restart.pressed.is_connected(_on_restart_pressed):
+		_restart.pressed.connect(_on_restart_pressed)
+	if not _back.pressed.is_connected(_on_back_pressed):
+		_back.pressed.connect(_on_back_pressed)
 	_game_over.visible = false
 	_on_score_changed(_controller.grid.get_score())
 	_on_coins_changed(ProfileService.get_coins())

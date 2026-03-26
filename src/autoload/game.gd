@@ -11,11 +11,13 @@ func get_game_config() -> GameConfig:
 
 
 func go_to_main_menu() -> void:
-	get_tree().change_scene_to_file("res://src/ui/main_menu.tscn")
+	# Defer scene switching so we don't mutate the scene tree while it's
+	# still processing _ready() / child add/remove operations.
+	get_tree().call_deferred("change_scene_to_file", "res://src/ui/main_menu.tscn")
 
 func go_to_run() -> void:
-	get_tree().change_scene_to_file("res://scenes/gameplay/run_root.tscn")
+	get_tree().call_deferred("change_scene_to_file", "res://scenes/gameplay/run_root.tscn")
 
 
 func go_to_settings_skins() -> void:
-	get_tree().change_scene_to_file("res://src/ui/settings_skins.tscn")
+	get_tree().call_deferred("change_scene_to_file", "res://src/ui/settings_skins.tscn")

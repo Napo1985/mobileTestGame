@@ -11,6 +11,7 @@ signal shield_absorbed
 const GRID_COLS := 5
 const AHEAD_BUFFER := 10
 const BEHIND_KEEP := 5
+const ROAD_START_ROW_ID := 3
 
 @export var cell_size: int = 72
 
@@ -31,6 +32,8 @@ var _active_chests: int = 0
 var _player_lane: int = 2
 var _player_row_id: int = 0
 var _score: int = 0
+var _best_road_level: int = 0
+var _road_start_row_id: int = ROAD_START_ROW_ID
 
 ## Wall-clock seconds for car motion (stable across pause if we pause later).
 var _time_sec: float = 0.0
@@ -73,8 +76,10 @@ func reset_run() -> void:
 	_dead = false
 	set_process(true)
 	_player_lane = 2
-	_player_row_id = 3
+	_player_row_id = 0
 	_score = 0
+	_best_road_level = 0
+	_road_start_row_id = ROAD_START_ROW_ID
 	_time_sec = 0.0
 	_rows_since_last_chest = 0
 	_active_chests = 0
@@ -84,7 +89,7 @@ func reset_run() -> void:
 	var max_r := _player_row_id + AHEAD_BUFFER
 	for r in max_r + 1:
 		var def: RowDefinition
-		if r < 3:
+		if r < ROAD_START_ROW_ID:
 			def = _grass
 			_rows[r] = _make_runtime(def, false)
 		else:
@@ -125,9 +130,7 @@ func try_move(dir: Vector2i) -> bool:
 	_player_lane = nl
 	_player_row_id = nr
 
-	if dir.y > 0:
-		_score += 1
-		scored.emit(_score)
+	_try_update_score_from_road()
 
 	_ensure_rows_ahead()
 	_prune_behind()
@@ -332,12 +335,34 @@ func _is_car_collision() -> bool:
 		smult = def.obstacle.speed_multiplier
 		wratio = def.obstacle.width_ratio
 	var car_half := wratio * float(cell_size) * 0.5
-	var player_half := float(cell_size) * 0.28
+	# Match the player circle radius used in `_draw_player()` (r = cs * 0.26).
+	var player_half := float(cell_size) * 0.26
 	var speed := def.car_speed * smult * float(def.car_direction)
 	var off: float = rt.lane_offset.get(_player_lane, 0.0)
 	var cx := fposmod(off + _time_sec * speed, W)
 	var px := (float(_player_lane) + 0.5) * float(cell_size)
-	return _axis_dist_wrapped(cx, px, W) < (car_half + player_half)
+	var dist := _axis_dist_wrapped(cx, px, W)
+	# Use `<=` so edge contacts register, with a tiny epsilon for float error.
+	var eps := 0.00001 * float(cell_size)
+	return dist <= (car_half + player_half) + eps
+
+func _try_update_score_from_road() -> void:
+	var rt: RowRuntime = _rows.get(_player_row_id)
+	if rt == null:
+		return
+	if rt.def.kind != RowDefinition.Kind.ROAD:
+		return
+
+	# ROAD rows get a "level index" starting at 1 on the first road row.
+	var road_level := _player_row_id - _road_start_row_id + 1
+	if road_level <= _best_road_level:
+		return
+
+	# Jump score by the delta in road level (record high semantics).
+	var delta := road_level - _best_road_level
+	_best_road_level = road_level
+	_score += delta
+	scored.emit(_score)
 
 
 func _axis_dist_wrapped(a: float, b: float, period: float) -> float:
