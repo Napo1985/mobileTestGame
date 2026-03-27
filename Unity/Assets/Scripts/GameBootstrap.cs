@@ -1,26 +1,42 @@
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.UI;
 
 /// <summary>
 /// Black screen, finger or mouse drags the ship, auto-fires upward.
 /// </summary>
 public class GameBootstrap : MonoBehaviour
 {
+    [SerializeField] Camera gameplayCamera;
     [SerializeField] float fireInterval = 0.12f;
     [SerializeField] float bulletSpeed = 16f;
     [SerializeField] float shipMoveSmoothing = 18f;
+    [SerializeField] int bulletDamage = 5;
+    [SerializeField] int enemyHpMin = 5;
+    [SerializeField] int enemyHpMax = 150;
+    [SerializeField] int strongEnemyHpThreshold = 75;
+    [SerializeField] float enemySpawnInterval = 0.8f;
+    [SerializeField] float weakEnemySpeedMin = 2.8f;
+    [SerializeField] float weakEnemySpeedMax = 4.2f;
+    [SerializeField] float strongEnemySpeedMin = 2.2f;
+    [SerializeField] float strongEnemySpeedMax = 3.2f;
+    [SerializeField] float weakEnemyDiagonalDrift = 1.4f;
 
     Transform _ship;
     Camera _cam;
     Sprite _pixelSprite;
     float _fireTimer;
+    float _enemySpawnTimer;
+    int _score;
+    Text _scoreLabel;
 
     void Awake()
     {
-        _cam = GetComponent<Camera>();
+        NormalizeGameplayConfig();
+        _cam = AcquireCamera();
         _cam.orthographic = true;
         _cam.orthographicSize = 8f;
-        transform.position = new Vector3(0f, 0f, -10f);
+        _cam.transform.position = new Vector3(0f, 0f, -10f);
         _cam.clearFlags = CameraClearFlags.SolidColor;
         _cam.backgroundColor = Color.black;
 
@@ -31,6 +47,40 @@ public class GameBootstrap : MonoBehaviour
 
         _pixelSprite = BuildPixelSprite();
         _ship = BuildShip();
+        _scoreLabel = BuildScoreLabel();
+        UpdateScoreLabel();
+    }
+
+    Camera AcquireCamera()
+    {
+        if (gameplayCamera != null)
+            return gameplayCamera;
+
+        var fromSelf = GetComponent<Camera>();
+        if (fromSelf != null)
+            return fromSelf;
+
+        if (Camera.main != null)
+            return Camera.main;
+
+        var camGo = new GameObject("GameplayCamera");
+        var cam = camGo.AddComponent<Camera>();
+        cam.tag = "MainCamera";
+        return cam;
+    }
+
+    void NormalizeGameplayConfig()
+    {
+        bulletDamage = Mathf.Max(1, bulletDamage);
+        enemyHpMin = Mathf.Max(1, enemyHpMin);
+        enemyHpMax = Mathf.Max(enemyHpMin, enemyHpMax);
+        strongEnemyHpThreshold = Mathf.Clamp(strongEnemyHpThreshold, enemyHpMin, enemyHpMax);
+        enemySpawnInterval = Mathf.Max(0.05f, enemySpawnInterval);
+        weakEnemySpeedMin = Mathf.Max(0.1f, weakEnemySpeedMin);
+        weakEnemySpeedMax = Mathf.Max(weakEnemySpeedMin, weakEnemySpeedMax);
+        strongEnemySpeedMin = Mathf.Max(0.1f, strongEnemySpeedMin);
+        strongEnemySpeedMax = Mathf.Max(strongEnemySpeedMin, strongEnemySpeedMax);
+        weakEnemyDiagonalDrift = Mathf.Max(0f, weakEnemyDiagonalDrift);
     }
 
     static Sprite BuildPixelSprite()
@@ -58,6 +108,7 @@ public class GameBootstrap : MonoBehaviour
     {
         UpdateShipFromPointer();
         UpdateFiring();
+        UpdateEnemySpawning();
     }
 
     void UpdateShipFromPointer()
@@ -119,8 +170,103 @@ public class GameBootstrap : MonoBehaviour
         var shipP = _ship.position;
         go.transform.position = shipP + Vector3.up * 0.75f;
 
+        var rb = go.AddComponent<Rigidbody2D>();
+        rb.bodyType = RigidbodyType2D.Kinematic;
+        rb.gravityScale = 0f;
+        rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+
+        var collider = go.AddComponent<BoxCollider2D>();
+        collider.isTrigger = true;
+
         var bullet = go.AddComponent<Bullet>();
-        bullet.Configure(bulletSpeed, _cam.orthographicSize + 6f);
+        bullet.Configure(bulletSpeed, _cam.orthographicSize + 6f, bulletDamage);
+    }
+
+    void UpdateEnemySpawning()
+    {
+        _enemySpawnTimer -= Time.deltaTime;
+        if (_enemySpawnTimer > 0f)
+            return;
+
+        _enemySpawnTimer = enemySpawnInterval;
+        SpawnEnemy();
+    }
+
+    void SpawnEnemy()
+    {
+        int hp = Random.Range(enemyHpMin, enemyHpMax + 1);
+        bool isStrong = hp >= strongEnemyHpThreshold;
+        float speed = isStrong
+            ? Random.Range(strongEnemySpeedMin, strongEnemySpeedMax)
+            : Random.Range(weakEnemySpeedMin, weakEnemySpeedMax);
+        float driftX = isStrong ? 0f : Random.Range(-weakEnemyDiagonalDrift, weakEnemyDiagonalDrift);
+
+        var go = new GameObject("Enemy");
+        var sr = go.AddComponent<SpriteRenderer>();
+        sr.sprite = _pixelSprite;
+        sr.color = isStrong ? new Color(1f, 0.35f, 0.35f) : new Color(1f, 0.6f, 0.6f);
+
+        float spawnY = _cam.orthographicSize + 1.6f;
+        float halfW = _cam.orthographicSize * _cam.aspect;
+        float spawnX = Random.Range(-halfW + 0.8f, halfW - 0.8f);
+        go.transform.position = new Vector3(spawnX, spawnY, 0f);
+
+        float size = Mathf.Lerp(0.65f, 1.9f, Mathf.InverseLerp(enemyHpMin, enemyHpMax, hp));
+        go.transform.localScale = new Vector3(size, size, 1f);
+
+        var rb = go.AddComponent<Rigidbody2D>();
+        rb.bodyType = RigidbodyType2D.Kinematic;
+        rb.gravityScale = 0f;
+
+        var collider = go.AddComponent<BoxCollider2D>();
+        collider.isTrigger = true;
+
+        var enemy = go.AddComponent<Enemy>();
+        enemy.Configure(hp, speed, driftX, -_cam.orthographicSize - 2f, OnEnemyKilled);
+    }
+
+    void OnEnemyKilled(int maxHp)
+    {
+        _score += PointsForHp(maxHp);
+        UpdateScoreLabel();
+    }
+
+    static int PointsForHp(int maxHp)
+    {
+        return Mathf.Max(1, ((maxHp - 1) / 50) + 1);
+    }
+
+    Text BuildScoreLabel()
+    {
+        var canvasGo = new GameObject("GameplayCanvas");
+        var canvas = canvasGo.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvasGo.AddComponent<CanvasScaler>();
+        canvasGo.AddComponent<GraphicRaycaster>();
+
+        var labelGo = new GameObject("ScoreLabel");
+        labelGo.transform.SetParent(canvasGo.transform, false);
+        var rect = labelGo.AddComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = new Vector2(20f, -20f);
+        rect.sizeDelta = new Vector2(360f, 64f);
+
+        var text = labelGo.AddComponent<Text>();
+        text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        text.alignment = TextAnchor.UpperLeft;
+        text.fontSize = 30;
+        text.horizontalOverflow = HorizontalWrapMode.Overflow;
+        text.verticalOverflow = VerticalWrapMode.Overflow;
+        text.color = Color.white;
+        return text;
+    }
+
+    void UpdateScoreLabel()
+    {
+        if (_scoreLabel != null)
+            _scoreLabel.text = $"Score: {_score}";
     }
 }
 
