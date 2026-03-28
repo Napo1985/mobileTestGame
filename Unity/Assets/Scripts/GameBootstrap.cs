@@ -6,7 +6,7 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 /// <summary>
-/// Black screen, finger or mouse drags the ship, auto-fires upward.
+/// Space shooter: drag to move. Shots fire only while finger / mouse is held (not over UI).
 /// </summary>
 public class GameBootstrap : MonoBehaviour
 {
@@ -34,9 +34,23 @@ public class GameBootstrap : MonoBehaviour
     [SerializeField] float shotModifierDropChance = 0.25f;
     [SerializeField] float shotModifierStep = 0.15f;
     [SerializeField] float pickupFallSpeed = 2.5f;
+    [SerializeField] float pickupVisualScale = 1.35f;
+    [Tooltip("HP subtracted from every enemy when Atom Bomb is pressed. Default 50.")]
     [SerializeField] int atomBombDamage = 50;
     [SerializeField] string mainMenuSceneName = "Main";
     [SerializeField] float gameOverReturnDelaySeconds = 2f;
+
+    [Header("Custom images (optional — empty = Skins menu or procedural)")]
+    [SerializeField] float customSpritePixelsPerUnit = 100f;
+    [Tooltip("If set, overrides StreamingAssets/Skins and procedural art. Absolute path, StreamingAssets path, or Resources key.")]
+    [SerializeField] string playerShipImagePath = "";
+    [SerializeField] string enemyShipImagePath = "";
+    [SerializeField] string asteroidImagePath = "";
+    [SerializeField] string bulletImagePath = "";
+    [SerializeField] string backgroundImagePath = "";
+    [SerializeField] string pickupHealthImagePath = "";
+    [SerializeField] string pickupPositiveImagePath = "";
+    [SerializeField] string pickupNegativeImagePath = "";
 
     Transform _ship;
     Camera _cam;
@@ -44,6 +58,9 @@ public class GameBootstrap : MonoBehaviour
     Sprite _playerShipSprite;
     Sprite _enemyScoutSprite;
     Sprite[] _asteroidSprites;
+    Sprite _pickupHealthSprite;
+    Sprite _pickupPositiveSprite;
+    Sprite _pickupNegativeSprite;
     float _fireTimer;
     float _enemySpawnTimer;
     int _score;
@@ -69,20 +86,16 @@ public class GameBootstrap : MonoBehaviour
         _cam.orthographicSize = 8f;
         _cam.transform.position = new Vector3(0f, 0f, -10f);
         _cam.clearFlags = CameraClearFlags.SolidColor;
-        _cam.backgroundColor = Color.black;
+        _cam.backgroundColor = new Color(0.02f, 0.025f, 0.07f, 1f);
+
+        BuildSpaceBackdrop();
 
         RenderSettings.ambientMode = AmbientMode.Flat;
         RenderSettings.ambientLight = Color.white;
 
         Application.targetFrameRate = 60;
 
-        _pixelSprite = BuildPixelSprite();
-        _playerShipSprite = GameplaySprites.PlayerShip();
-        _enemyScoutSprite = GameplaySprites.EnemyScoutShip();
-        const int asteroidVariantCount = 12;
-        _asteroidSprites = new Sprite[asteroidVariantCount];
-        for (int i = 0; i < asteroidVariantCount; i++)
-            _asteroidSprites[i] = GameplaySprites.Asteroid(i * 104729);
+        LoadGameplaySpritesAndPickups();
 
         _playerHp = playerMaxHp;
         _ship = BuildShip();
@@ -132,8 +145,52 @@ public class GameBootstrap : MonoBehaviour
         shotModifierDropChance = Mathf.Clamp01(shotModifierDropChance);
         shotModifierStep = Mathf.Clamp(shotModifierStep, 0.01f, 1f);
         pickupFallSpeed = Mathf.Max(0.1f, pickupFallSpeed);
+        pickupVisualScale = Mathf.Max(0.5f, pickupVisualScale);
         atomBombDamage = Mathf.Max(1, atomBombDamage);
         gameOverReturnDelaySeconds = Mathf.Max(0f, gameOverReturnDelaySeconds);
+        customSpritePixelsPerUnit = Mathf.Max(1f, customSpritePixelsPerUnit);
+    }
+
+    void LoadGameplaySpritesAndPickups()
+    {
+        float p = customSpritePixelsPerUnit;
+
+        _playerShipSprite = RuntimeSpriteLoader.LoadSpriteFlexible(
+            GameSkinResolver.ResolvePathForLoader(playerShipImagePath, GameSkinSlot.Player), p);
+        if (_playerShipSprite == null)
+            _playerShipSprite = GameplaySprites.PlayerShip();
+
+        _enemyScoutSprite = RuntimeSpriteLoader.LoadSpriteFlexible(
+            GameSkinResolver.ResolvePathForLoader(enemyShipImagePath, GameSkinSlot.EnemyShip), p);
+        if (_enemyScoutSprite == null)
+            _enemyScoutSprite = GameplaySprites.EnemyScoutShip();
+
+        const int asteroidVariantCount = 12;
+        _asteroidSprites = new Sprite[asteroidVariantCount];
+        var asteroidCustom = RuntimeSpriteLoader.LoadSpriteFlexible(
+            GameSkinResolver.ResolvePathForLoader(asteroidImagePath, GameSkinSlot.Asteroid), p);
+        if (asteroidCustom != null)
+        {
+            for (int i = 0; i < asteroidVariantCount; i++)
+                _asteroidSprites[i] = asteroidCustom;
+        }
+        else
+        {
+            for (int i = 0; i < asteroidVariantCount; i++)
+                _asteroidSprites[i] = GameplaySprites.Asteroid(i * 104729);
+        }
+
+        _pixelSprite = RuntimeSpriteLoader.LoadSpriteFlexible(
+            GameSkinResolver.ResolvePathForLoader(bulletImagePath, GameSkinSlot.Bullet), p);
+        if (_pixelSprite == null)
+            _pixelSprite = BuildPixelSprite();
+
+        _pickupHealthSprite = RuntimeSpriteLoader.LoadSpriteFlexible(
+            GameSkinResolver.ResolvePathForLoader(pickupHealthImagePath, GameSkinSlot.PickupHealth), p);
+        _pickupPositiveSprite = RuntimeSpriteLoader.LoadSpriteFlexible(
+            GameSkinResolver.ResolvePathForLoader(pickupPositiveImagePath, GameSkinSlot.PickupPositive), p);
+        _pickupNegativeSprite = RuntimeSpriteLoader.LoadSpriteFlexible(
+            GameSkinResolver.ResolvePathForLoader(pickupNegativeImagePath, GameSkinSlot.PickupNegative), p);
     }
 
     static Sprite BuildPixelSprite()
@@ -143,7 +200,23 @@ public class GameBootstrap : MonoBehaviour
             tex,
             new Rect(0, 0, tex.width, tex.height),
             new Vector2(0.5f, 0.5f),
-            16f);
+            16f,
+            0u,
+            SpriteMeshType.Tight,
+            Vector4.zero,
+            true);
+    }
+
+    void BuildSpaceBackdrop()
+    {
+        var go = new GameObject("SpaceBackdrop");
+        var sr = go.AddComponent<SpriteRenderer>();
+        Sprite backdrop = RuntimeSpriteLoader.LoadSpriteFlexible(
+            GameSkinResolver.ResolvePathForLoader(backgroundImagePath, GameSkinSlot.Background), 40f);
+        if (backdrop == null)
+            backdrop = SpaceBackdrop.CreateSprite();
+        sr.sprite = backdrop;
+        SpaceBackdrop.SetupRendererForOrthoCamera(sr, _cam);
     }
 
     Transform BuildShip()
@@ -154,7 +227,7 @@ public class GameBootstrap : MonoBehaviour
         sr.color = new Color(0.55f, 0.92f, 1f, 1f);
         go.transform.localScale = Vector3.one * (1.15f * elementScaleMultiplier);
         go.transform.position = new Vector3(0f, -5.5f, 0f);
-        go.AddComponent<BoxCollider2D>();
+        SpriteCollider2DUtil.AddPolygonFromSprite(go, _playerShipSprite, false);
         go.AddComponent<PlayerShipMarker>();
         return go.transform;
     }
@@ -173,6 +246,9 @@ public class GameBootstrap : MonoBehaviour
 
     void UpdateShipFromPointer()
     {
+        if (IsPointerOverBlockingUi())
+            return;
+
         if (Input.touchCount > 0)
         {
             var t = Input.GetTouch(0);
@@ -181,6 +257,29 @@ public class GameBootstrap : MonoBehaviour
         }
         else if (Input.GetMouseButton(0))
             MoveShipTowardScreen(Input.mousePosition);
+    }
+
+    static bool IsPointerHeldForGameplay()
+    {
+        if (Input.touchCount > 0)
+        {
+            var t = Input.GetTouch(0);
+            return t.phase == TouchPhase.Began || t.phase == TouchPhase.Moved || t.phase == TouchPhase.Stationary;
+        }
+
+        return Input.GetMouseButton(0);
+    }
+
+    static bool IsPointerOverBlockingUi()
+    {
+        var es = EventSystem.current;
+        if (es == null)
+            return false;
+
+        if (Input.touchCount > 0)
+            return es.IsPointerOverGameObject(Input.GetTouch(0).fingerId);
+
+        return es.IsPointerOverGameObject();
     }
 
     void MoveShipTowardScreen(Vector2 screen)
@@ -212,6 +311,12 @@ public class GameBootstrap : MonoBehaviour
 
     void UpdateFiring()
     {
+        if (!IsPointerHeldForGameplay() || IsPointerOverBlockingUi())
+        {
+            _fireTimer = 0f;
+            return;
+        }
+
         _fireTimer -= Time.deltaTime;
         if (_fireTimer > 0f)
             return;
@@ -236,11 +341,12 @@ public class GameBootstrap : MonoBehaviour
         rb.gravityScale = 0f;
         rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
 
-        var collider = go.AddComponent<BoxCollider2D>();
-        collider.isTrigger = true;
+        SpriteCollider2DUtil.AddPolygonFromSprite(go, _pixelSprite, true);
 
         var bullet = go.AddComponent<Bullet>();
         bullet.Configure(CurrentBulletSpeed(), _cam.orthographicSize + 6f, CurrentBulletDamage());
+
+        GameplayVfx.SetupFastTrail(go, new Color(1f, 0.9f, 0.35f, 0.65f), 0.12f * bulletScale * elementScaleMultiplier, 0.12f);
     }
 
     void UpdateEnemySpawning()
@@ -290,15 +396,20 @@ public class GameBootstrap : MonoBehaviour
         rb.bodyType = RigidbodyType2D.Kinematic;
         rb.gravityScale = 0f;
 
-        var collider = go.AddComponent<BoxCollider2D>();
-        collider.isTrigger = true;
+        SpriteCollider2DUtil.AddPolygonFromSprite(go, sr.sprite, true);
 
         var enemy = go.AddComponent<Enemy>();
         enemy.Configure(hp, speed, driftX, -_cam.orthographicSize - 2f, OnEnemyKilled, OnPlayerHitByEnemy, spin);
+
+        if (!isStrong)
+            GameplayVfx.SetupFastTrail(go, new Color(1f, 0.4f, 0.45f, 0.45f), 0.22f * size * elementScaleMultiplier, 0.18f);
     }
 
     void OnEnemyKilled(int maxHp, Vector3 atPosition)
     {
+        float boom = Mathf.Lerp(0.55f, 1.35f, Mathf.InverseLerp(enemyHpMin, enemyHpMax, maxHp));
+        GameplayVfx.SpawnExplosion(atPosition, new Color(1f, 0.55f, 0.2f, 1f), boom);
+
         _score += PointsForHp(maxHp);
         TrySpawnDrop(atPosition);
         UpdateHud();
@@ -581,7 +692,11 @@ public class GameBootstrap : MonoBehaviour
 
         var enemies = FindObjectsOfType<Enemy>();
         for (int i = 0; i < enemies.Length; i++)
+        {
+            Vector3 p = enemies[i].transform.position;
+            GameplayVfx.SpawnExplosion(p, new Color(0.7f, 0.35f, 1f, 1f), 0.85f);
             enemies[i].ApplyDamage(atomBombDamage);
+        }
     }
 
     void TrySpawnDrop(Vector3 atPosition)
@@ -613,20 +728,36 @@ public class GameBootstrap : MonoBehaviour
     {
         var go = new GameObject(type.ToString());
         var sr = go.AddComponent<SpriteRenderer>();
-        sr.sprite = _pixelSprite;
-        sr.color = ColorForPowerUp(type, value);
+        Sprite pickupSprite = PickupSpriteFor(type, value);
+        sr.sprite = pickupSprite;
+        sr.color = pickupSprite == _pixelSprite ? ColorForPowerUp(type, value) : Color.white;
         go.transform.position = atPosition;
-        go.transform.localScale = new Vector3(0.7f, 0.7f, 1f) * elementScaleMultiplier;
+        float s = 1.08f * pickupVisualScale;
+        go.transform.localScale = new Vector3(s, s, 1f) * elementScaleMultiplier;
 
         var rb = go.AddComponent<Rigidbody2D>();
         rb.bodyType = RigidbodyType2D.Kinematic;
         rb.gravityScale = 0f;
 
-        var collider = go.AddComponent<BoxCollider2D>();
-        collider.isTrigger = true;
+        SpriteCollider2DUtil.AddPolygonFromSprite(go, pickupSprite, true);
 
         var pickup = go.AddComponent<PowerUpPickup>();
         pickup.Configure(type, value, pickupFallSpeed, -_cam.orthographicSize - 2f, OnPowerUpCollected);
+    }
+
+    Sprite PickupSpriteFor(PowerUpType type, float value)
+    {
+        if (type == PowerUpType.HealthPack && _pickupHealthSprite != null)
+            return _pickupHealthSprite;
+        if (type != PowerUpType.HealthPack)
+        {
+            if (value >= 0f && _pickupPositiveSprite != null)
+                return _pickupPositiveSprite;
+            if (value < 0f && _pickupNegativeSprite != null)
+                return _pickupNegativeSprite;
+        }
+
+        return _pixelSprite;
     }
 
     static Color ColorForPowerUp(PowerUpType type, float value)
@@ -635,7 +766,7 @@ public class GameBootstrap : MonoBehaviour
             return new Color(0.35f, 1f, 0.45f);
         if (value >= 0f)
             return new Color(0.45f, 0.85f, 1f);
-        return new Color(1f, 0.75f, 0.25f);
+        return new Color(0.95f, 0.2f, 0.22f, 1f);
     }
 
     void OnPowerUpCollected(PowerUpType type, float value)

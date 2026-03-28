@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 /// <summary>
 /// Procedural 2D silhouettes (no art assets) for player ship, enemy ships, and asteroids.
@@ -29,16 +29,27 @@ public static class GameplaySprites
         FillRect(tex, 6, h / 2 - 3, w / 2 - 10, h / 2 + 3, C(0.75f, 0.82f, 0.95f, 1f));
         FillRect(tex, w / 2 + 10, h / 2 - 3, w - 6, h / 2 + 3, C(0.75f, 0.82f, 0.95f, 1f));
 
-        // Cockpit window
+        // Cockpit window + rim
+        FillEllipse(tex, w / 2f, h - 22f, 6.2f, 8.2f, C(0.5f, 0.7f, 0.95f, 1f));
         FillEllipse(tex, w / 2f, h - 22f, 5f, 7f, C(0.35f, 0.65f, 0.95f, 1f));
+
+        // Wing highlights
+        FillRect(tex, 5, h / 2 + 2, w / 2 - 11, h / 2 + 4, C(1f, 1f, 1f, 0.4f));
+        FillRect(tex, w / 2 + 11, h / 2 + 2, w - 5, h / 2 + 4, C(1f, 1f, 1f, 0.4f));
 
         // Engine housings
         FillRect(tex, w / 2 - 12, 4, w / 2 - 4, 12, C(0.5f, 0.55f, 0.62f, 1f));
         FillRect(tex, w / 2 + 4, 4, w / 2 + 12, 12, C(0.5f, 0.55f, 0.62f, 1f));
 
+        // Engine glow
+        FillEllipse(tex, w / 2f - 8f, 4f, 4f, 5f, C(0.2f, 0.85f, 1f, 0.75f));
+        FillEllipse(tex, w / 2f + 8f, 4f, 4f, 5f, C(0.2f, 0.85f, 1f, 0.75f));
+        FillEllipse(tex, w / 2f - 8f, 5f, 2.5f, 3f, C(0.75f, 0.95f, 1f, 0.95f));
+        FillEllipse(tex, w / 2f + 8f, 5f, 2.5f, 3f, C(0.75f, 0.95f, 1f, 0.95f));
+
         tex.Apply();
         tex.filterMode = FilterMode.Point;
-        return Sprite.Create(tex, new Rect(0, 0, w, h), new Vector2(0.5f, 0.42f), pixelsPerUnit);
+        return CreateTexturedSprite(tex, w, h, new Vector2(0.5f, 0.42f), pixelsPerUnit);
     }
 
     public static Sprite EnemyScoutShip(float pixelsPerUnit = 38f)
@@ -64,7 +75,7 @@ public static class GameplaySprites
 
         tex.Apply();
         tex.filterMode = FilterMode.Point;
-        return Sprite.Create(tex, new Rect(0, 0, w, h), new Vector2(0.5f, 0.4f), pixelsPerUnit);
+        return CreateTexturedSprite(tex, w, h, new Vector2(0.5f, 0.4f), pixelsPerUnit);
     }
 
     public static Sprite Asteroid(int seed, float pixelsPerUnit = 36f)
@@ -110,7 +121,20 @@ public static class GameplaySprites
 
         tex.Apply();
         tex.filterMode = FilterMode.Bilinear;
-        return Sprite.Create(tex, new Rect(0, 0, w, h), new Vector2(0.5f, 0.5f), pixelsPerUnit);
+        return CreateTexturedSprite(tex, w, h, new Vector2(0.5f, 0.5f), pixelsPerUnit);
+    }
+
+    static Sprite CreateTexturedSprite(Texture2D tex, float w, float h, Vector2 pivot, float ppu)
+    {
+        return Sprite.Create(
+            tex,
+            new Rect(0f, 0f, w, h),
+            pivot,
+            ppu,
+            0u,
+            SpriteMeshType.Tight,
+            Vector4.zero,
+            true);
     }
 
     static bool Crater(int x, int y, int seed, int ox, int oy, float rad)
