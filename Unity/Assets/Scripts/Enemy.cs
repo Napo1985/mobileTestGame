@@ -78,6 +78,14 @@ public class Enemy : MonoBehaviour
         _sr = GetComponent<SpriteRenderer>();
         _originalColor = _sr != null ? _sr.color : Color.white;
 
+        if (_enemyType == EnemyType.Asteroid && _sr != null)
+        {
+            // HP tier read: cooler dim rocks → brighter/violet elites (chunky = more dangerous).
+            float t = Mathf.Clamp01(Mathf.InverseLerp(6f, 88f, _maxHp));
+            _sr.color = Color.Lerp(new Color(0.92f, 0.94f, 1f, 1f), new Color(0.72f, 0.58f, 1f, 1f), t);
+            _originalColor = _sr.color;
+        }
+
         if (_enemyType == EnemyType.Ship)
         {
             // Lock behavior type at spawn — ships never change personality mid-life
@@ -273,7 +281,10 @@ public class Enemy : MonoBehaviour
 
         if (_currentHp > 0)
         {
-            StartCoroutine(HitFlash());
+            float chunky = Mathf.Clamp01(Mathf.InverseLerp(12f, 95f, _maxHp));
+            GameplayVfx.SpawnHitSpark(transform.position, 0.85f + chunky * 0.75f);
+            GameplayAudioHub.Instance?.PlayHitEnemy();
+            StartCoroutine(HitFlash(chunky));
             return;
         }
 
@@ -290,11 +301,12 @@ public class Enemy : MonoBehaviour
         Destroy(gameObject);
     }
 
-    IEnumerator HitFlash()
+    IEnumerator HitFlash(float chunkyScale)
     {
         if (_sr == null) yield break;
-        _sr.color = Color.white;
-        yield return new WaitForSeconds(0.07f);
+        _sr.color = Color.Lerp(Color.white, new Color(1f, 0.55f, 0.35f, 1f), chunkyScale * 0.35f);
+        float dur = 0.06f + chunkyScale * 0.09f;
+        yield return new WaitForSeconds(dur);
         if (_sr != null)
             _sr.color = _originalColor;
     }

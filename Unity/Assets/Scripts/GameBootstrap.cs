@@ -8,39 +8,61 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 /// <summary>
-/// Space shooter: drag to move. Shots fire only while finger / mouse is held (not over UI).
+/// Space shooter: drag to move, hold to fire (blocked while pointer is over UI — same as before).
+/// Stages advance on a timer; difficulty scales per wave. Optional GameplayAudioHub on this object for SFX/music.
 /// </summary>
 public class GameBootstrap : MonoBehaviour
 {
+    const string PrefHighScore = "SpaceShooterHighScore";
+    const string PrefBestWave = "SpaceShooterBestWave";
+
     [SerializeField] Camera gameplayCamera;
-    [SerializeField] float baseFireInterval = 0.12f;
-    [SerializeField] float baseBulletSpeed = 16f;
+    [SerializeField] float baseFireInterval = 0.1f;
+    [SerializeField] float baseBulletSpeed = 19f;
     [SerializeField] float shipMoveSmoothing = 18f;
-    [SerializeField] int baseBulletDamage = 5;
-    [SerializeField] float baseBulletScale = 1f;
-    [SerializeField] int enemyHpMin = 5;
-    [SerializeField] int enemyHpMax = 150;
-    [SerializeField] int strongEnemyHpThreshold = 75;
-    [SerializeField] float enemySpawnInterval = 0.8f;
-    [SerializeField] float weakEnemySpeedMin = 2.8f;
-    [SerializeField] float weakEnemySpeedMax = 4.2f;
-    [SerializeField] float strongEnemySpeedMin = 2.2f;
-    [SerializeField] float strongEnemySpeedMax = 3.2f;
-    [SerializeField] float weakEnemyDiagonalDrift = 1.4f;
+    [SerializeField] int baseBulletDamage = 9;
+    [SerializeField] float baseBulletScale = 1.05f;
+    [SerializeField] int enemyHpMin = 2;
+    [SerializeField] int enemyHpMax = 72;
+    [SerializeField] int strongEnemyHpThreshold = 36;
+    [Tooltip("Base seconds between enemy spawns at wave 1; shrinks slightly each wave (floored).")]
+    [SerializeField] float enemySpawnInterval = 1.05f;
+    [SerializeField] float weakEnemySpeedMin = 2.45f;
+    [SerializeField] float weakEnemySpeedMax = 3.85f;
+    [SerializeField] float strongEnemySpeedMin = 1.95f;
+    [SerializeField] float strongEnemySpeedMax = 2.85f;
+    [SerializeField] float weakEnemyDiagonalDrift = 1.15f;
     [SerializeField] int playerMaxHp = 100;
-    [SerializeField] int enemyTouchDamage = 25;
+    [SerializeField] int enemyTouchDamage = 16;
     [SerializeField] float playWidthScale = 0.7f;
+    [Tooltip("Keeps the ship slightly above the bottom of the play clamp for thumb clearance.")]
+    [SerializeField] float shipBottomMarginWorld = 0.85f;
     [SerializeField] float elementScaleMultiplier = 1.35f;
-    [SerializeField] float healthPackDropChanceWhenDamaged = 0.2f;
-    [SerializeField] float healthPackHealPercentOfMax = 0.1f;
-    [SerializeField] float shotModifierDropChance = 0.25f;
-    [SerializeField] float shotModifierStep = 0.15f;
+    [SerializeField] float healthPackDropChanceWhenDamaged = 0.14f;
+    [SerializeField] float healthPackHealPercentOfMax = 0.11f;
+    [SerializeField] float shotModifierDropChance = 0.18f;
+    [SerializeField] float shotModifierStep = 0.12f;
     [SerializeField] float pickupFallSpeed = 2.5f;
     [SerializeField] float pickupVisualScale = 1.35f;
-    [Tooltip("HP subtracted from every enemy when Atom Bomb is pressed. Default 50.")]
-    [SerializeField] int atomBombDamage = 50;
+    [Tooltip("HP subtracted from every enemy when Atom Bomb is pressed.")]
+    [SerializeField] int atomBombDamage = 42;
     [SerializeField] string mainMenuSceneName = "Main";
     [SerializeField] float gameOverReturnDelaySeconds = 2f;
+
+    [Header("Stages / waves")]
+    [Tooltip("Seconds of combat per stage before intermission and next wave.")]
+    [SerializeField] float stageDurationSeconds = 44f;
+    [Tooltip("Pause spawning and show STAGE CLEAR between waves.")]
+    [SerializeField] float waveIntermissionSeconds = 2.35f;
+    [Tooltip("0 = no bosses. Every Nth wave (after wave 1), spawns one tank asteroid at wave start.")]
+    [SerializeField] int bossEveryNWaves = 4;
+    [SerializeField] float bossHpMultiplier = 2.15f;
+    [Tooltip("Scout spawn weight at wave 1; decreases each wave toward more asteroids.")]
+    [SerializeField] float scoutSpawnWeightStart = 0.72f;
+    [SerializeField] float scoutSpawnWeightPerWave = 0.028f;
+
+    [Header("Audio (optional — add GameplayAudioHub to this GameObject and assign clips)")]
+    [SerializeField] GameplayAudioHub audioHub;
 
     [Header("Custom images (optional — empty = Skins menu or procedural)")]
     [SerializeField] float customSpritePixelsPerUnit = 100f;
@@ -79,6 +101,17 @@ public class GameBootstrap : MonoBehaviour
     Text _gameOverLabel;
     Button _atomBombButton;
     bool _gameOver;
+
+    GameObject _backdropRoot;
+    SpriteRenderer _mainBackdropSr;
+    Text _waveText;
+    Text _stageBannerText;
+    int _waveNumber = 1;
+    float _stageTimeRemaining;
+    bool _waveIntermission;
+    float _intermissionTimer;
+    int _sessionHighScore;
+    int _sessionBestWave;
 
     // ── Animation state ──────────────────────────────────────────────
     SpriteRenderer _engineGlowLeft;
@@ -119,6 +152,13 @@ public class GameBootstrap : MonoBehaviour
         _ship = BuildShip();
         _shipPrevX = _ship.position.x;
         BuildHud();
+        _sessionHighScore = PlayerPrefs.GetInt(PrefHighScore, 0);
+        _sessionBestWave = PlayerPrefs.GetInt(PrefBestWave, 1);
+        _stageTimeRemaining = stageDurationSeconds;
+        if (audioHub == null)
+            audioHub = GetComponent<GameplayAudioHub>();
+        audioHub?.StartGameplayMusicIfConfigured();
+        RefreshStagePresentation();
         UpdateHud();
     }
 
@@ -168,6 +208,13 @@ public class GameBootstrap : MonoBehaviour
         atomBombDamage = Mathf.Max(1, atomBombDamage);
         gameOverReturnDelaySeconds = Mathf.Max(0f, gameOverReturnDelaySeconds);
         customSpritePixelsPerUnit = Mathf.Max(1f, customSpritePixelsPerUnit);
+        stageDurationSeconds = Mathf.Max(8f, stageDurationSeconds);
+        waveIntermissionSeconds = Mathf.Max(0f, waveIntermissionSeconds);
+        bossEveryNWaves = Mathf.Max(0, bossEveryNWaves);
+        bossHpMultiplier = Mathf.Max(1f, bossHpMultiplier);
+        scoutSpawnWeightStart = Mathf.Clamp01(scoutSpawnWeightStart);
+        scoutSpawnWeightPerWave = Mathf.Max(0f, scoutSpawnWeightPerWave);
+        shipBottomMarginWorld = Mathf.Max(0f, shipBottomMarginWorld);
     }
 
     void LoadGameplaySpritesAndPickups()
@@ -231,13 +278,19 @@ public class GameBootstrap : MonoBehaviour
     void BuildSpaceBackdrop()
     {
         var go = new GameObject("SpaceBackdrop");
+        _backdropRoot = go;
         var sr = go.AddComponent<SpriteRenderer>();
-        Sprite backdrop = RuntimeSpriteLoader.LoadSpriteFlexible(
-            GameSkinResolver.ResolvePathForLoader(backgroundImagePath, GameSkinSlot.Background), 40f);
+        _mainBackdropSr = sr;
+        string bgResolved = GameSkinResolver.ResolvePathForLoader(backgroundImagePath, GameSkinSlot.Background);
+        Sprite backdrop = RuntimeSpriteLoader.LoadSpriteFlexible(bgResolved, 40f);
+        bool loadedCustomBackground = backdrop != null;
         if (backdrop == null)
             backdrop = SpaceBackdrop.CreateSprite();
         sr.sprite = backdrop;
         SpaceBackdrop.SetupRendererForOrthoCamera(sr, _cam);
+        // Parallax star tiles only when not using a successfully loaded custom background (keeps art clean).
+        if (!loadedCustomBackground)
+            SpaceBackdrop.AddScrollingStarLayers(go, _cam, Color.white);
     }
 
     Transform BuildShip()
@@ -274,6 +327,9 @@ public class GameBootstrap : MonoBehaviour
     void Update()
     {
         UpdateScreenShake();
+
+        if (!_gameOver && _playerHp > 0)
+            TickStageTimer();
 
         if (_gameOver)
             return;
@@ -402,7 +458,8 @@ public class GameBootstrap : MonoBehaviour
         float halfW = halfH * _cam.aspect * playWidthScale;
         const float pad = 0.6f;
         world.x = Mathf.Clamp(world.x, -halfW + pad, halfW - pad);
-        world.y = Mathf.Clamp(world.y, -halfH + pad, halfH - pad);
+        float minY = -halfH + pad + shipBottomMarginWorld;
+        world.y = Mathf.Clamp(world.y, minY, halfH - pad);
         return world;
     }
 
@@ -453,21 +510,27 @@ public class GameBootstrap : MonoBehaviour
         // #endregion
 
         GameplayVfx.SetupFastTrail(go, new Color(1f, 0.9f, 0.35f, 0.65f), 0.12f * bulletScale * elementScaleMultiplier, 0.12f);
+
+        GameplayVfx.SpawnMuzzleFlash(shipP + Vector3.up * 0.62f, new Color(1f, 0.88f, 0.4f, 0.9f), CurrentBulletScale());
+        GameplayAudioHub.Instance?.PlayShoot();
     }
 
     void UpdateEnemySpawning()
     {
+        if (_waveIntermission)
+            return;
+
         _enemySpawnTimer -= Time.deltaTime;
         if (_enemySpawnTimer > 0f)
             return;
 
-        _enemySpawnTimer = enemySpawnInterval;
+        _enemySpawnTimer = GetSpawnIntervalForWave();
         SpawnEnemy();
     }
 
     void SpawnEnemy()
     {
-        int hp = Random.Range(enemyHpMin, enemyHpMax + 1);
+        int hp = RollEnemyHpForCurrentWave();
         bool isStrong = hp >= strongEnemyHpThreshold;
         float speed = isStrong
             ? Random.Range(strongEnemySpeedMin, strongEnemySpeedMax)
@@ -494,6 +557,9 @@ public class GameBootstrap : MonoBehaviour
         float halfW = _cam.orthographicSize * _cam.aspect * playWidthScale;
         float spawnX = Random.Range(-halfW + 0.8f, halfW - 0.8f);
         go.transform.position = new Vector3(spawnX, spawnY, 0f);
+
+        if (isStrong)
+            GameplayVfx.SpawnAsteroidEntryPulse(new Vector3(spawnX, spawnY + 0.35f, 0f));
 
         float size = Mathf.Lerp(0.65f, 1.9f, Mathf.InverseLerp(enemyHpMin, enemyHpMax, hp));
         go.transform.localScale = new Vector3(size, size, 1f) * elementScaleMultiplier;
@@ -535,13 +601,14 @@ public class GameBootstrap : MonoBehaviour
         TriggerScreenShake(boom * 0.12f, boom * 0.3f);
 
         _score += PointsForHp(maxHp);
+        GameplayAudioHub.Instance?.PlayEnemyDeath();
         TrySpawnDrop(atPosition);
         UpdateHud();
     }
 
     static int PointsForHp(int maxHp)
     {
-        return Mathf.Max(1, ((maxHp - 1) / 50) + 1);
+        return Mathf.Max(1, maxHp / 12 + (maxHp >= 40 ? 3 : 0));
     }
 
     void BuildHud()
@@ -563,14 +630,23 @@ public class GameBootstrap : MonoBehaviour
         scaler.matchWidthOrHeight = 0.5f;
         canvasGo.AddComponent<GraphicRaycaster>();
 
+        var safeGo = new GameObject("SafeArea");
+        safeGo.transform.SetParent(canvasGo.transform, false);
+        var safeRt = safeGo.AddComponent<RectTransform>();
+        safeRt.anchorMin = Vector2.zero;
+        safeRt.anchorMax = Vector2.one;
+        safeRt.offsetMin = Vector2.zero;
+        safeRt.offsetMax = Vector2.zero;
+        ApplyScreenSafeArea(safeRt);
+
         var hudRoot = new GameObject("HudRoot");
-        hudRoot.transform.SetParent(canvasGo.transform, false);
+        hudRoot.transform.SetParent(safeGo.transform, false);
         var hudRt = hudRoot.AddComponent<RectTransform>();
         hudRt.anchorMin = new Vector2(0f, 1f);
         hudRt.anchorMax = new Vector2(0f, 1f);
         hudRt.pivot = new Vector2(0f, 1f);
         hudRt.anchoredPosition = new Vector2(24f, -24f);
-        hudRt.sizeDelta = new Vector2(420f, 120f);
+        hudRt.sizeDelta = new Vector2(520f, 120f);
 
         Font hudFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
 
@@ -687,19 +763,62 @@ public class GameBootstrap : MonoBehaviour
         hpOutline.effectDistance = new Vector2(1.5f, -1.5f);
         _hpBarLabelText.raycastTarget = false;
 
+        var waveGo = new GameObject("WaveText");
+        waveGo.transform.SetParent(safeGo.transform, false);
+        var waveRect = waveGo.AddComponent<RectTransform>();
+        waveRect.anchorMin = new Vector2(1f, 1f);
+        waveRect.anchorMax = new Vector2(1f, 1f);
+        waveRect.pivot = new Vector2(1f, 1f);
+        waveRect.anchoredPosition = new Vector2(-20f, -20f);
+        waveRect.sizeDelta = new Vector2(340f, 80f);
+        _waveText = waveGo.AddComponent<Text>();
+        _waveText.font = hudFont;
+        _waveText.fontSize = 28;
+        _waveText.fontStyle = FontStyle.Bold;
+        _waveText.alignment = TextAnchor.UpperRight;
+        _waveText.horizontalOverflow = HorizontalWrapMode.Overflow;
+        _waveText.verticalOverflow = VerticalWrapMode.Overflow;
+        _waveText.color = new Color(0.95f, 0.92f, 1f, 1f);
+        _waveText.raycastTarget = false;
+        var waveOutline = waveGo.AddComponent<Outline>();
+        waveOutline.effectColor = new Color(0f, 0f, 0f, 0.72f);
+        waveOutline.effectDistance = new Vector2(2f, -2f);
+
+        var bannerGo = new GameObject("StageBanner");
+        bannerGo.transform.SetParent(safeGo.transform, false);
+        var bannerRect = bannerGo.AddComponent<RectTransform>();
+        bannerRect.anchorMin = new Vector2(0.1f, 0.42f);
+        bannerRect.anchorMax = new Vector2(0.9f, 0.58f);
+        bannerRect.offsetMin = Vector2.zero;
+        bannerRect.offsetMax = Vector2.zero;
+        _stageBannerText = bannerGo.AddComponent<Text>();
+        _stageBannerText.font = hudFont;
+        _stageBannerText.fontSize = 44;
+        _stageBannerText.fontStyle = FontStyle.Bold;
+        _stageBannerText.alignment = TextAnchor.MiddleCenter;
+        _stageBannerText.horizontalOverflow = HorizontalWrapMode.Overflow;
+        _stageBannerText.verticalOverflow = VerticalWrapMode.Overflow;
+        _stageBannerText.color = new Color(0.45f, 0.98f, 0.88f, 1f);
+        _stageBannerText.text = string.Empty;
+        _stageBannerText.raycastTarget = false;
+        var bannerOutline = bannerGo.AddComponent<Outline>();
+        bannerOutline.effectColor = new Color(0f, 0f, 0f, 0.8f);
+        bannerOutline.effectDistance = new Vector2(3f, -3f);
+        bannerGo.SetActive(false);
+
         var gameOverGo = new GameObject("GameOverLabel");
-        gameOverGo.transform.SetParent(canvasGo.transform, false);
+        gameOverGo.transform.SetParent(safeGo.transform, false);
         var gameOverRect = gameOverGo.AddComponent<RectTransform>();
         gameOverRect.anchorMin = new Vector2(0.5f, 0.5f);
         gameOverRect.anchorMax = new Vector2(0.5f, 0.5f);
         gameOverRect.pivot = new Vector2(0.5f, 0.5f);
         gameOverRect.anchoredPosition = Vector2.zero;
-        gameOverRect.sizeDelta = new Vector2(520f, 120f);
+        gameOverRect.sizeDelta = new Vector2(640f, 200f);
 
         _gameOverLabel = gameOverGo.AddComponent<Text>();
         _gameOverLabel.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         _gameOverLabel.alignment = TextAnchor.MiddleCenter;
-        _gameOverLabel.fontSize = 56;
+        _gameOverLabel.fontSize = 48;
         _gameOverLabel.horizontalOverflow = HorizontalWrapMode.Overflow;
         _gameOverLabel.verticalOverflow = VerticalWrapMode.Overflow;
         _gameOverLabel.color = new Color(1f, 0.35f, 0.38f);
@@ -710,18 +829,19 @@ public class GameBootstrap : MonoBehaviour
         gameOverOutline.effectDistance = new Vector2(3f, -3f);
 
         var atomBombGo = new GameObject("AtomBombButton");
-        atomBombGo.transform.SetParent(canvasGo.transform, false);
+        atomBombGo.transform.SetParent(safeGo.transform, false);
         var atomBombRect = atomBombGo.AddComponent<RectTransform>();
         atomBombRect.anchorMin = new Vector2(0f, 0f);
         atomBombRect.anchorMax = new Vector2(0f, 0f);
         atomBombRect.pivot = new Vector2(0f, 0f);
-        atomBombRect.anchoredPosition = new Vector2(20f, 20f);
+        atomBombRect.anchoredPosition = new Vector2(16f, 16f);
         atomBombRect.sizeDelta = new Vector2(240f, 70f);
 
         var bombImage = atomBombGo.AddComponent<Image>();
         bombImage.color = new Color(0.2f, 0.2f, 0.2f, 0.85f);
         _atomBombButton = atomBombGo.AddComponent<Button>();
         _atomBombButton.targetGraphic = bombImage;
+        _atomBombButton.onClick.AddListener(() => GameplayAudioHub.Instance?.PlayUiClick());
         _atomBombButton.onClick.AddListener(UseAtomBomb);
 
         var buttonTextGo = new GameObject("Text");
@@ -749,7 +869,18 @@ public class GameBootstrap : MonoBehaviour
     void UpdateHud()
     {
         if (_scoreText != null)
-            _scoreText.text = $"SCORE  {_score}";
+        {
+            int storedBest = PlayerPrefs.GetInt(PrefHighScore, 0);
+            _scoreText.text = $"SCORE  {_score}    BEST  {storedBest}";
+        }
+
+        if (_waveText != null)
+        {
+            if (_waveIntermission)
+                _waveText.text = "BREAK";
+            else
+                _waveText.text = $"WAVE {_waveNumber}  ·  {Mathf.CeilToInt(_stageTimeRemaining)}s";
+        }
 
         if (_hpBarLabelText != null)
             _hpBarLabelText.text = $"{_playerHp} / {playerMaxHp}";
@@ -779,6 +910,8 @@ public class GameBootstrap : MonoBehaviour
     void ApplyDamageToPlayer(int damage)
     {
         _playerHp = Mathf.Max(0, _playerHp - Mathf.Max(0, damage));
+        if (damage > 0)
+            GameplayAudioHub.Instance?.PlayPlayerHurt();
         UpdateHud();
         if (_playerHp > 0)
             return;
@@ -792,10 +925,24 @@ public class GameBootstrap : MonoBehaviour
             return;
         _gameOver = true;
 
+        GameplayAudioHub.Instance?.StopMusic();
+        GameplayAudioHub.Instance?.PlayGameOver();
+
+        int prevBest = PlayerPrefs.GetInt(PrefHighScore, 0);
+        if (_score > prevBest)
+            PlayerPrefs.SetInt(PrefHighScore, _score);
+        int prevWave = PlayerPrefs.GetInt(PrefBestWave, 1);
+        PlayerPrefs.SetInt(PrefBestWave, Mathf.Max(prevWave, _waveNumber));
+        PlayerPrefs.Save();
+
         if (_ship != null)
             _ship.gameObject.SetActive(false);
         if (_gameOverLabel != null)
-            _gameOverLabel.text = "GAME OVER";
+        {
+            int best = PlayerPrefs.GetInt(PrefHighScore, 0);
+            int bestW = PlayerPrefs.GetInt(PrefBestWave, 1);
+            _gameOverLabel.text = $"GAME OVER\nSCORE {_score}\nBEST {best}   WAVE {bestW}";
+        }
         if (_atomBombButton != null)
             _atomBombButton.interactable = false;
 
@@ -834,6 +981,9 @@ public class GameBootstrap : MonoBehaviour
     {
         if (_ship == null || _playerHp <= 0 || _gameOver)
             return;
+
+        Vector3 aim = _ship.position;
+        GameplayVfx.SpawnMissileTelegraph(fromPosition, aim, 0.26f);
 
         var go = new GameObject("EnemyMissile");
         var sr = go.AddComponent<SpriteRenderer>();
@@ -998,6 +1148,167 @@ public class GameBootstrap : MonoBehaviour
         }
 
         UpdateHud();
+        GameplayAudioHub.Instance?.PlayPickup();
+    }
+
+    void ApplyScreenSafeArea(RectTransform safeArea)
+    {
+        if (safeArea == null || Screen.width <= 0 || Screen.height <= 0)
+            return;
+        Rect r = Screen.safeArea;
+        Vector2 min = new Vector2(r.xMin / Screen.width, r.yMin / Screen.height);
+        Vector2 max = new Vector2(r.xMax / Screen.width, r.yMax / Screen.height);
+        safeArea.anchorMin = min;
+        safeArea.anchorMax = max;
+        safeArea.offsetMin = Vector2.zero;
+        safeArea.offsetMax = Vector2.zero;
+    }
+
+    void TickStageTimer()
+    {
+        if (_waveIntermission)
+        {
+            _intermissionTimer -= Time.deltaTime;
+            UpdateHud();
+            if (_intermissionTimer <= 0f)
+                EndWaveIntermission();
+            return;
+        }
+
+        _stageTimeRemaining -= Time.deltaTime;
+        if (_stageTimeRemaining <= 0f)
+            BeginWaveIntermission();
+        else
+            UpdateHud();
+    }
+
+    void BeginWaveIntermission()
+    {
+        if (_waveIntermission)
+            return;
+        _waveIntermission = true;
+        _intermissionTimer = Mathf.Max(0.05f, waveIntermissionSeconds);
+
+        int prevBestWave = PlayerPrefs.GetInt(PrefBestWave, 1);
+        PlayerPrefs.SetInt(PrefBestWave, Mathf.Max(prevBestWave, _waveNumber + 1));
+        int prevHi = PlayerPrefs.GetInt(PrefHighScore, 0);
+        if (_score > prevHi)
+            PlayerPrefs.SetInt(PrefHighScore, _score);
+        PlayerPrefs.Save();
+
+        if (_stageBannerText != null)
+        {
+            _stageBannerText.gameObject.SetActive(true);
+            _stageBannerText.text = $"STAGE {_waveNumber} CLEAR";
+        }
+
+        GameplayAudioHub.Instance?.PlayWaveClear();
+        UpdateHud();
+    }
+
+    void EndWaveIntermission()
+    {
+        _waveIntermission = false;
+        if (_stageBannerText != null)
+        {
+            _stageBannerText.gameObject.SetActive(false);
+            _stageBannerText.text = string.Empty;
+        }
+
+        _waveNumber++;
+        _stageTimeRemaining = stageDurationSeconds;
+        RefreshStagePresentation();
+        TrySpawnBossForNewWave();
+        UpdateHud();
+    }
+
+    void RefreshStagePresentation()
+    {
+        float u = Mathf.Clamp01((_waveNumber - 1) / 10f);
+        var deep = Color.Lerp(new Color(0.02f, 0.025f, 0.08f, 1f), new Color(0.045f, 0.02f, 0.11f, 1f), u);
+        _cam.backgroundColor = deep;
+
+        if (_mainBackdropSr != null)
+        {
+            var mul = Color.Lerp(Color.white, new Color(0.88f, 0.92f, 1.05f, 1f), u * 0.4f);
+            _mainBackdropSr.color = mul;
+        }
+    }
+
+    float GetSpawnIntervalForWave()
+    {
+        float w = Mathf.Max(0, _waveNumber - 1);
+        return Mathf.Max(0.36f, enemySpawnInterval - w * 0.034f);
+    }
+
+    int RollEnemyHpForCurrentWave()
+    {
+        float w = Mathf.Max(0, _waveNumber - 1);
+        int cap = Mathf.RoundToInt(Mathf.Min(enemyHpMax, enemyHpMin + 4 + w * 5));
+        int hi = Mathf.Max(enemyHpMin, cap);
+
+        float scoutChance = Mathf.Clamp01(scoutSpawnWeightStart - w * scoutSpawnWeightPerWave);
+        bool scout = strongEnemyHpThreshold > enemyHpMin && Random.value < scoutChance;
+
+        if (scout)
+        {
+            int upper = Mathf.Max(enemyHpMin, strongEnemyHpThreshold - 1);
+            return Random.Range(enemyHpMin, upper + 1);
+        }
+
+        int low = Mathf.Max(enemyHpMin, strongEnemyHpThreshold);
+        return Random.Range(low, hi + 1);
+    }
+
+    void TrySpawnBossForNewWave()
+    {
+        if (bossEveryNWaves <= 0)
+            return;
+        if (_waveNumber <= 1)
+            return;
+        if (_waveNumber % bossEveryNWaves != 0)
+            return;
+
+        SpawnBossAsteroid();
+    }
+
+    void SpawnBossAsteroid()
+    {
+        int hp = Mathf.RoundToInt(Mathf.Lerp(strongEnemyHpThreshold, enemyHpMax, 0.82f) * bossHpMultiplier);
+        hp = Mathf.Clamp(hp, strongEnemyHpThreshold + 1, enemyHpMax * 3);
+
+        float speed = strongEnemySpeedMin * 0.85f;
+        float driftX = 0f;
+
+        var go = new GameObject("BossAsteroid");
+        var sr = go.AddComponent<SpriteRenderer>();
+        int idx = (hp * 17 + _waveNumber * 31) % _asteroidSprites.Length;
+        sr.sprite = _asteroidSprites[idx];
+        sr.color = new Color(1f, 0.82f, 0.95f, 1f);
+
+        float spawnY = _cam.orthographicSize + 1.9f;
+        float halfW = _cam.orthographicSize * _cam.aspect * playWidthScale;
+        float spawnX = Random.Range(-halfW * 0.35f, halfW * 0.35f);
+        go.transform.position = new Vector3(spawnX, spawnY, 0f);
+        GameplayVfx.SpawnAsteroidEntryPulse(new Vector3(spawnX, spawnY + 0.5f, 0f), 3.4f, 0.45f);
+
+        float size = 2.15f * elementScaleMultiplier;
+        go.transform.localScale = new Vector3(size, size, 1f);
+
+        var rb = go.AddComponent<Rigidbody2D>();
+        rb.bodyType = RigidbodyType2D.Kinematic;
+        rb.gravityScale = 0f;
+
+        SpriteCollider2DUtil.AddPolygonFromSprite(go, sr.sprite, true);
+
+        var enemy = go.AddComponent<Enemy>();
+        enemy.Configure(
+            hp, speed, driftX, -_cam.orthographicSize - 2f,
+            OnEnemyKilled, OnPlayerHitByEnemy, Random.Range(28f, 52f) * (Random.value < 0.5f ? 1f : -1f),
+            EnemyType.Asteroid,
+            null,
+            null,
+            (Action<Vector3, float>)HandleAoeExplosion);
     }
 
     int CurrentBulletDamage()

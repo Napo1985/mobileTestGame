@@ -151,6 +151,174 @@ public static class GameplayVfx
         var anim = go.AddComponent<ShockwaveAnimator>();
         anim.Init(lr, maxRadius, duration);
     }
+
+    // ── Hit / muzzle / telegraphs (lightweight for mobile) ────────────
+
+    /// <summary>Small bright burst when a bullet connects (enemy still alive).</summary>
+    public static void SpawnHitSpark(Vector3 worldPosition, float chunkyScale = 1f)
+    {
+        float s = Mathf.Clamp(chunkyScale, 0.55f, 1.65f);
+        var go = new GameObject("HitSpark");
+        go.transform.position = worldPosition;
+        go.SetActive(false);
+
+        var ps = go.AddComponent<ParticleSystem>();
+        var main = ps.main;
+        main.playOnAwake = false;
+        main.loop = false;
+        main.duration = 0.12f;
+        main.startLifetime = new ParticleSystem.MinMaxCurve(0.08f, 0.16f);
+        main.startSpeed = new ParticleSystem.MinMaxCurve(1.2f * s, 3.2f * s);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.04f * s, 0.1f * s);
+        main.startColor = new ParticleSystem.MinMaxGradient(
+            new Color(1f, 0.95f, 0.55f, 1f),
+            new Color(1f, 0.45f, 0.2f, 1f));
+        main.gravityModifier = 0f;
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+
+        var emission = ps.emission;
+        emission.rateOverTime = 0f;
+        emission.SetBursts(new[] { new ParticleSystem.Burst(0f, (short)(10 + 6 * s), (short)(14 + 8 * s)) });
+
+        var shape = ps.shape;
+        shape.shapeType = ParticleSystemShapeType.Sphere;
+        shape.radius = 0.06f * s;
+
+        var pr = go.GetComponent<ParticleSystemRenderer>();
+        pr.material = SpriteMat;
+
+        go.SetActive(true);
+        ps.Play();
+        Object.Destroy(go, 0.45f);
+    }
+
+    /// <summary>One-frame style flash at barrel; short-lived particles only.</summary>
+    public static void SpawnMuzzleFlash(Vector3 worldPosition, Color tint, float scale = 1f)
+    {
+        var go = new GameObject("MuzzleFlash");
+        go.transform.position = worldPosition;
+        go.SetActive(false);
+
+        var ps = go.AddComponent<ParticleSystem>();
+        var main = ps.main;
+        main.playOnAwake = false;
+        main.loop = false;
+        main.duration = 0.08f;
+        main.startLifetime = 0.12f;
+        main.startSpeed = new ParticleSystem.MinMaxCurve(0.8f * scale, 2.4f * scale);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.05f * scale, 0.12f * scale);
+        main.startColor = tint;
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+
+        var emission = ps.emission;
+        emission.rateOverTime = 0f;
+        emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 8, 12) });
+
+        var shape = ps.shape;
+        shape.shapeType = ParticleSystemShapeType.Cone;
+        shape.angle = 18f;
+        shape.rotation = new Vector3(-90f, 0f, 0f);
+        shape.radius = 0.02f * scale;
+
+        var pr = go.GetComponent<ParticleSystemRenderer>();
+        pr.material = SpriteMat;
+
+        go.SetActive(true);
+        ps.Play();
+        Object.Destroy(go, 0.35f);
+    }
+
+    /// <summary>Fading line from enemy to approximate missile path (telegraph).</summary>
+    public static void SpawnMissileTelegraph(Vector3 from, Vector3 to, float duration = 0.28f)
+    {
+        var go = new GameObject("MissileTelegraph");
+        go.transform.position = from;
+
+        var lr = go.AddComponent<LineRenderer>();
+        lr.material = SpriteMat;
+        lr.useWorldSpace = true;
+        lr.loop = false;
+        lr.positionCount = 2;
+        lr.sortingOrder = 80;
+        lr.startWidth = 0.07f;
+        lr.endWidth = 0.02f;
+        lr.SetPosition(0, from);
+        lr.SetPosition(1, to);
+        lr.startColor = new Color(1f, 0.35f, 0.2f, 0.55f);
+        lr.endColor = new Color(1f, 0.2f, 0.1f, 0f);
+
+        var fade = go.AddComponent<TelegraphLineFader>();
+        fade.Init(duration);
+    }
+
+    /// <summary>Brief vertical pulse at top of playfield when a heavy asteroid enters.</summary>
+    public static void SpawnAsteroidEntryPulse(Vector3 topWorldPosition, float halfHeight = 2.2f, float duration = 0.32f)
+    {
+        var go = new GameObject("AsteroidEntryPulse");
+        go.transform.position = topWorldPosition;
+
+        var lr = go.AddComponent<LineRenderer>();
+        lr.material = SpriteMat;
+        lr.useWorldSpace = true;
+        lr.loop = false;
+        lr.positionCount = 2;
+        lr.sortingOrder = 75;
+        lr.startWidth = 0.14f;
+        lr.endWidth = 0.04f;
+        Vector3 a = topWorldPosition + Vector3.down * halfHeight;
+        Vector3 b = topWorldPosition + Vector3.up * (halfHeight * 0.35f);
+        lr.SetPosition(0, a);
+        lr.SetPosition(1, b);
+        lr.startColor = new Color(1f, 0.55f, 0.25f, 0.5f);
+        lr.endColor = new Color(1f, 0.85f, 0.4f, 0f);
+
+        var fade = go.AddComponent<TelegraphLineFader>();
+        fade.Init(duration);
+    }
+}
+
+/// <summary>Fades out and destroys a LineRenderer used for telegraphs.</summary>
+public class TelegraphLineFader : MonoBehaviour
+{
+    LineRenderer _lr;
+    float _duration;
+    float _elapsed;
+    Color _color0;
+    Color _color1;
+
+    public void Init(float duration)
+    {
+        _lr = GetComponent<LineRenderer>();
+        _duration = Mathf.Max(0.05f, duration);
+        _elapsed = 0f;
+        if (_lr != null)
+        {
+            _color0 = _lr.startColor;
+            _color1 = _lr.endColor;
+        }
+    }
+
+    void Update()
+    {
+        if (_lr == null)
+        {
+            Destroy(gameObject);
+            return;
+        }
+
+        _elapsed += Time.deltaTime;
+        float t = Mathf.Clamp01(_elapsed / _duration);
+        float a = 1f - t;
+        var c0 = _color0;
+        var c1 = _color1;
+        c0.a = _color0.a * a;
+        c1.a = _color1.a * a;
+        _lr.startColor = c0;
+        _lr.endColor = c1;
+
+        if (t >= 1f)
+            Destroy(gameObject);
+    }
 }
 
 /// <summary>
