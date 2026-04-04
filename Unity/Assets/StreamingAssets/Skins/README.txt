@@ -1,6 +1,6 @@
 Skin folders (each image file = one selectable skin in the main menu SKINS tab)
 
-Place only PNG, JPG, JPEG, BMP, or GIF files. They must decode in-game and be between 4 and 4096 pixels per side (max 16 MB per file). Invalid files are hidden from the list.
+Place only PNG, JPG, JPEG, BMP, or GIF files. They must decode in-game (max 8192 px per side on disk, max 16 MB per file). At load time, images are automatically scaled to fit within 4096 px on the longest edge (and upscaled if below 4 px on the shortest edge). In gameplay, custom skins also get a world-size fit (default ~1.38 units on the longest edge for the player) so high-res PNGs are not huge on screen — tune on GameBootstrap under Custom images. Invalid files are hidden from the list.
 
 Folders:
   Player/          — player ship

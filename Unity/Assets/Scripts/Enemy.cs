@@ -38,11 +38,6 @@ public class Enemy : MonoBehaviour
     float _strafeDir = 1f;
     float _suicideSpeed;
 
-    // ── Vertical bounce (MissileFiring ships only) ────────────────────
-    float _bounceMinY;   // lower boundary — reverse here and go up
-    float _bounceMaxY;   // upper boundary — reverse here and go down
-    float _verticalDir = -1f;
-
     // ── Animation ─────────────────────────────────────────────────────
     SpriteRenderer _sr;
     Color _originalColor;
@@ -100,16 +95,6 @@ public class Enemy : MonoBehaviour
                 : UnityEngine.Random.Range(1.0f, 2.0f);
 
             _strafeDir = UnityEngine.Random.value < 0.5f ? 1f : -1f;
-            _verticalDir = -1f;
-
-            if (_shipBehavior == ShipBehavior.MissileFiring)
-            {
-                // Bounce between spawn row and a minimum visible Y so the ship
-                // never leaves the screen — it keeps strafing back and forth
-                // and up/down until the player destroys it.
-                _bounceMaxY = transform.position.y - 0.5f; // just below spawn row
-                _bounceMinY = destroyBelowY + 5.5f;        // bottom of visible play area
-            }
 
             // Tint to telegraph type: orange-red for suicide, default for missile
             if (_sr != null && _shipBehavior == ShipBehavior.SuicideRunner)
@@ -183,11 +168,8 @@ public class Enemy : MonoBehaviour
                 break;
 
             case AiState.FireMissile:
-                // MissileFiring only — slow hover while reloading second salvo;
-                // still respect vertical bounce so the ship doesn't drift off screen.
-                if (transform.position.y <= _bounceMinY) _verticalDir =  1f;
-                if (transform.position.y >= _bounceMaxY) _verticalDir = -1f;
-                transform.position += new Vector3(0f, _verticalDir * _speed * 0.25f, 0f) * Time.deltaTime;
+                // MissileFiring only — slow descent while reloading (no upward motion).
+                transform.position += new Vector3(0f, -_speed * 0.22f, 0f) * Time.deltaTime;
                 if (_aiTimer <= 0f)
                 {
                     _spawnMissileAt?.Invoke(transform.position);
@@ -219,13 +201,8 @@ public class Enemy : MonoBehaviour
 
     void ExecuteStrafe()
     {
-        float vertSpeed = _speed * 0.45f;
+        float downSpeed = _speed * 0.38f;
         float strafeSpeed = _speed * 0.9f;
-
-        // Bounce vertically — flip direction at both boundaries so the ship
-        // keeps oscillating inside the visible screen indefinitely.
-        if (transform.position.y <= _bounceMinY) _verticalDir =  1f; // hit bottom → go up
-        if (transform.position.y >= _bounceMaxY) _verticalDir = -1f; // hit top  → go down
 
         if (_playerTransform != null)
         {
@@ -234,7 +211,7 @@ public class Enemy : MonoBehaviour
             _strafeDir = Mathf.Sign(dx);
         }
 
-        transform.position += new Vector3(_strafeDir * strafeSpeed, _verticalDir * vertSpeed, 0f) * Time.deltaTime;
+        transform.position += new Vector3(_strafeDir * strafeSpeed, -downSpeed, 0f) * Time.deltaTime;
     }
 
     void TransitionToSuicideRun()
@@ -248,7 +225,14 @@ public class Enemy : MonoBehaviour
     {
         Vector3 dir = Vector3.down;
         if (_playerTransform != null)
-            dir = (_playerTransform.position - transform.position).normalized;
+        {
+            Vector3 raw = _playerTransform.position - transform.position;
+            raw.y = Mathf.Min(0f, raw.y);
+            if (raw.sqrMagnitude < 0.0004f)
+                dir = Vector3.down;
+            else
+                dir = raw.normalized;
+        }
 
         transform.position += dir * _suicideSpeed * Time.deltaTime;
         _suicideSpeed = Mathf.Min(_suicideSpeed + 5f * Time.deltaTime, _speed * 4.5f);

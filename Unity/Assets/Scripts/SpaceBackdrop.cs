@@ -143,7 +143,12 @@ public static class SpaceBackdrop
     /// <summary>
     /// Parents two scrolling star planes under <paramref name="backdropRoot"/> (expects root already placed at camera).
     /// </summary>
-    public static void AddScrollingStarLayers(GameObject backdropRoot, Camera cam, Color tintMultiply)
+    public static void AddScrollingStarLayers(
+        GameObject backdropRoot,
+        Camera cam,
+        Color tintMultiply,
+        float farWorldScrollSpeed = 0.11f,
+        float nearWorldScrollSpeed = 0.24f)
     {
         if (backdropRoot == null || cam == null)
             return;
@@ -157,7 +162,7 @@ public static class SpaceBackdrop
             CreateStarTileSprite(128, 11, 40f),
             new Color(tintMultiply.r, tintMultiply.g, tintMultiply.b, 0.38f),
             -199,
-            0.11f,
+            farWorldScrollSpeed,
             1.2f);
 
         var nearGo = new GameObject("ParallaxStarsNear");
@@ -173,7 +178,7 @@ public static class SpaceBackdrop
                 Mathf.Min(1f, tintMultiply.b * 1.06f),
                 0.52f),
             -198,
-            0.24f,
+            nearWorldScrollSpeed,
             1.2f);
     }
 }

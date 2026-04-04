@@ -40,9 +40,13 @@ public class MainScreenTabs : MonoBehaviour
     GameObject _panelPlay;
     GameObject _panelShop;
     GameObject _panelSkins;
+    Text _nextWaveLabel;
     GameObject _infoOverlay;
     ScrollRect _infoScroll;
+    ScrollRect _skinScrollRect;
+    RectTransform _skinScrollContentRt;
     Image _shipPreviewImg;
+    static Sprite _cachedUiRaycastSprite;
     readonly List<(GameSkinSlot slot, Text value)> _skinRowTexts = new List<(GameSkinSlot, Text)>();
 
     const string InfoHelpText =
@@ -122,6 +126,11 @@ public class MainScreenTabs : MonoBehaviour
         SelectTab(_current);
     }
 
+    void OnEnable()
+    {
+        RefreshNextWaveLabel();
+    }
+
     void BuildContent(Transform canvas)
     {
         Font font = BuiltinFont();
@@ -160,6 +169,27 @@ public class MainScreenTabs : MonoBehaviour
         startText.color = Color.black;
         startText.text = "START";
 
+        var nextWaveGo = CreateUIObject("NextWaveLabel", _panelPlay.transform);
+        var nextRt = nextWaveGo.GetComponent<RectTransform>();
+        nextRt.anchorMin = new Vector2(0.5f, 0.5f);
+        nextRt.anchorMax = new Vector2(0.5f, 0.5f);
+        nextRt.pivot = new Vector2(0.5f, 0.5f);
+        nextRt.anchoredPosition = new Vector2(0f, 24f);
+        nextRt.sizeDelta = new Vector2(720f, 48f);
+        _nextWaveLabel = nextWaveGo.AddComponent<Text>();
+        _nextWaveLabel.font = font;
+        _nextWaveLabel.fontSize = 26;
+        _nextWaveLabel.fontStyle = FontStyle.Bold;
+        _nextWaveLabel.alignment = TextAnchor.MiddleCenter;
+        _nextWaveLabel.horizontalOverflow = HorizontalWrapMode.Overflow;
+        _nextWaveLabel.verticalOverflow = VerticalWrapMode.Overflow;
+        _nextWaveLabel.color = new Color(0.88f, 0.95f, 1f, 1f);
+        _nextWaveLabel.raycastTarget = false;
+        var nextOutline = nextWaveGo.AddComponent<Outline>();
+        nextOutline.effectColor = new Color(0f, 0f, 0f, 0.72f);
+        nextOutline.effectDistance = new Vector2(2f, -2f);
+        RefreshNextWaveLabel();
+
         var shipPrevGo = CreateUIObject("ShipPreview", _panelPlay.transform);
         var shipRt = shipPrevGo.GetComponent<RectTransform>();
         shipRt.anchorMin = new Vector2(0.5f, 0.7f);
@@ -171,6 +201,14 @@ public class MainScreenTabs : MonoBehaviour
         _shipPreviewImg.preserveAspect = true;
         _shipPreviewImg.raycastTarget = false;
         RefreshShipPreviewSprite();
+    }
+
+    void RefreshNextWaveLabel()
+    {
+        if (_nextWaveLabel == null)
+            return;
+        int next = Mathf.Max(1, PlayerPrefs.GetInt(GameBootstrap.PrefNextWave, 1));
+        _nextWaveLabel.text = $"Next: Wave {next}";
     }
 
     GameObject BuildSkinsPanel(Transform area, Font font)
@@ -221,6 +259,11 @@ public class MainScreenTabs : MonoBehaviour
 
         var viewport = CreateUIObject("Viewport", scrollGo.transform);
         StretchFull(viewport);
+        // ScrollRect drag/scroll needs a Graphic on the viewport; RectMask2D alone does not receive pointers.
+        var vpImage = viewport.AddComponent<Image>();
+        vpImage.sprite = GetOrCreateUiRaycastSprite();
+        vpImage.color = new Color(1f, 1f, 1f, 0.01f);
+        vpImage.raycastTarget = true;
         viewport.AddComponent<RectMask2D>();
         var vpRt = viewport.GetComponent<RectTransform>();
 
@@ -246,6 +289,11 @@ public class MainScreenTabs : MonoBehaviour
 
         scroll.content = contentRt;
         scroll.viewport = vpRt;
+        scroll.scrollSensitivity = 35f;
+        scroll.inertia = true;
+        scroll.decelerationRate = 0.135f;
+        _skinScrollRect = scroll;
+        _skinScrollContentRt = contentRt;
 
         GameSkinPaths.EnsureSkinDirectoriesExist();
         foreach (var row in SkinRowDefs)
@@ -371,7 +419,7 @@ public class MainScreenTabs : MonoBehaviour
         if (_shipPreviewImg == null)
             return;
         string path = GameSkinResolver.ResolvePathForLoader(string.Empty, GameSkinSlot.Player);
-        var spr = RuntimeSpriteLoader.LoadSpriteFlexible(path, 100f);
+        var spr = RuntimeSpriteLoader.LoadSpriteFlexible(path, 100f, RuntimeSpriteLoader.DefaultPlayerSkinPreviewMaxWorldUnits);
         _shipPreviewImg.sprite = spr != null ? spr : GameplaySprites.PlayerShip();
     }
 
@@ -606,9 +654,15 @@ public class MainScreenTabs : MonoBehaviour
         SetTabStyle(_btnSkins, tab == Tab.Skins, TabSkinsNormal);
 
         if (tab == Tab.Skins)
+        {
             RefreshAllSkinRows();
+            RefreshSkinScrollLayout();
+        }
         if (tab == Tab.Play)
+        {
             RefreshShipPreviewSprite();
+            RefreshNextWaveLabel();
+        }
     }
 
     void SetTabStyle(Button btn, bool selected, Color normalBright)
@@ -620,6 +674,29 @@ public class MainScreenTabs : MonoBehaviour
         var text = btn.GetComponentInChildren<Text>();
         if (text != null)
             text.color = Color.black;
+    }
+
+    void RefreshSkinScrollLayout()
+    {
+        if (_skinScrollContentRt == null)
+            return;
+        Canvas.ForceUpdateCanvases();
+        LayoutRebuilder.ForceRebuildLayoutImmediate(_skinScrollContentRt);
+        if (_skinScrollRect != null)
+            _skinScrollRect.verticalNormalizedPosition = 1f;
+    }
+
+    static Sprite GetOrCreateUiRaycastSprite()
+    {
+        if (_cachedUiRaycastSprite != null)
+            return _cachedUiRaycastSprite;
+        var tex = Texture2D.whiteTexture;
+        _cachedUiRaycastSprite = Sprite.Create(
+            tex,
+            new Rect(0f, 0f, tex.width, tex.height),
+            new Vector2(0.5f, 0.5f),
+            100f);
+        return _cachedUiRaycastSprite;
     }
 
     static GameObject CreateUIObject(string name, Transform parent)

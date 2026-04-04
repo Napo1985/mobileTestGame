@@ -8,7 +8,8 @@ using UnityEngine;
 public static class GameSkinCompatibility
 {
     const int MinDimension = 4;
-    const int MaxDimension = 4096;
+    /// <summary>Largest edge allowed on disk; larger images are rejected before listing (memory safety).</summary>
+    const int MaxSourceDimension = 8192;
     const long MaxFileBytes = 16 * 1024 * 1024;
 
     static readonly HashSet<string> AllowedExtensions = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase)
@@ -54,7 +55,7 @@ public static class GameSkinCompatibility
         }
 
         if (tex.width < MinDimension || tex.height < MinDimension ||
-            tex.width > MaxDimension || tex.height > MaxDimension)
+            tex.width > MaxSourceDimension || tex.height > MaxSourceDimension)
         {
             failureReason = "dimensions";
             Object.Destroy(tex);

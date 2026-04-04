@@ -11,10 +11,15 @@ using UnityEngine.UI;
 /// Space shooter: drag to move, hold to fire (blocked while pointer is over UI — same as before).
 /// Stages advance on a timer; difficulty scales per wave. Optional GameplayAudioHub on this object for SFX/music.
 /// </summary>
+/// <remarks>
+/// PlayerPrefs keys: <c>SpaceShooterHighScore</c>, <c>SpaceShooterBestWave</c> (best wave reached),
+/// <c>SpaceShooterNextWave</c> (1-based wave shown on main menu and loaded when a run starts; updated on game over and stage clear).
+/// </remarks>
 public class GameBootstrap : MonoBehaviour
 {
-    const string PrefHighScore = "SpaceShooterHighScore";
-    const string PrefBestWave = "SpaceShooterBestWave";
+    public const string PrefHighScore = "SpaceShooterHighScore";
+    public const string PrefBestWave = "SpaceShooterBestWave";
+    public const string PrefNextWave = "SpaceShooterNextWave";
 
     [SerializeField] Camera gameplayCamera;
     [SerializeField] float baseFireInterval = 0.1f;
@@ -26,12 +31,12 @@ public class GameBootstrap : MonoBehaviour
     [SerializeField] int enemyHpMax = 72;
     [SerializeField] int strongEnemyHpThreshold = 36;
     [Tooltip("Base seconds between enemy spawns at wave 1; shrinks slightly each wave (floored).")]
-    [SerializeField] float enemySpawnInterval = 1.05f;
-    [SerializeField] float weakEnemySpeedMin = 2.45f;
-    [SerializeField] float weakEnemySpeedMax = 3.85f;
-    [SerializeField] float strongEnemySpeedMin = 1.95f;
-    [SerializeField] float strongEnemySpeedMax = 2.85f;
-    [SerializeField] float weakEnemyDiagonalDrift = 1.15f;
+    [SerializeField] float enemySpawnInterval = 1.48f;
+    [SerializeField] float weakEnemySpeedMin = 1.32f;
+    [SerializeField] float weakEnemySpeedMax = 2.05f;
+    [SerializeField] float strongEnemySpeedMin = 1.05f;
+    [SerializeField] float strongEnemySpeedMax = 1.72f;
+    [SerializeField] float weakEnemyDiagonalDrift = 0.82f;
     [SerializeField] int playerMaxHp = 100;
     [SerializeField] int enemyTouchDamage = 16;
     [SerializeField] float playWidthScale = 0.7f;
@@ -57,15 +62,42 @@ public class GameBootstrap : MonoBehaviour
     [Tooltip("0 = no bosses. Every Nth wave (after wave 1), spawns one tank asteroid at wave start.")]
     [SerializeField] int bossEveryNWaves = 4;
     [SerializeField] float bossHpMultiplier = 2.15f;
-    [Tooltip("Scout spawn weight at wave 1; decreases each wave toward more asteroids.")]
-    [SerializeField] float scoutSpawnWeightStart = 0.72f;
-    [SerializeField] float scoutSpawnWeightPerWave = 0.028f;
+    [Tooltip("Scout (ship) spawn probability at wave 1 for the late-game curve; blended in after early asteroid focus.")]
+    [SerializeField] float scoutSpawnWeightStart = 0.52f;
+    [SerializeField] float scoutSpawnWeightPerWave = 0.026f;
+    [Tooltip("Waves 1..N use asteroid-heavy spawns; ships appear roughly at earlyWaveShipSpawnChance.")]
+    [SerializeField] int firstStagesAsteroidFocus = 3;
+    [Range(0f, 1f)]
+    [Tooltip("Chance each spawn is a scout ship during early asteroid-focused waves.")]
+    [SerializeField] float earlyWaveShipSpawnChance = 0.2f;
+    [Tooltip("Waves after firstStagesAsteroidFocus over which ship probability eases toward the normal curve.")]
+    [SerializeField] int asteroidFocusEaseOutWaves = 3;
+    [Range(0.35f, 1f)]
+    [Tooltip("Multiplies rolled HP cap for asteroids during early focus waves (so rocks are a bit less tanky).")]
+    [SerializeField] float earlyAsteroidHpCapScale = 0.78f;
+    [Range(0.4f, 1f)]
+    [Tooltip("Multiplies fall speed for asteroids during early focus waves.")]
+    [SerializeField] float earlyAsteroidSpeedMultiplier = 0.72f;
+
+    [Header("Parallax (procedural star layers only)")]
+    [SerializeField] float parallaxFarScrollSpeed = 0.065f;
+    [SerializeField] float parallaxNearScrollSpeed = 0.14f;
 
     [Header("Audio (optional — add GameplayAudioHub to this GameObject and assign clips)")]
     [SerializeField] GameplayAudioHub audioHub;
 
     [Header("Custom images (optional — empty = Skins menu or procedural)")]
     [SerializeField] float customSpritePixelsPerUnit = 100f;
+    [Tooltip("Longest edge in world units for custom player skin files. Matches built-in ship (~56px @ 42 PPU ≈ 1.33). 0 = use customSpritePixelsPerUnit only.")]
+    [SerializeField] float customSkinPlayerMaxWorldUnits = 1.38f;
+    [Tooltip("Longest edge in world units for custom enemy ship files (~44px @ 38 PPU). 0 = PPU only.")]
+    [SerializeField] float customSkinEnemyMaxWorldUnits = 1.18f;
+    [Tooltip("Longest edge in world units for custom asteroid skin. 0 = PPU only.")]
+    [SerializeField] float customSkinAsteroidMaxWorldUnits = 1.35f;
+    [Tooltip("Longest edge in world units for custom bullet image. 0 = PPU only.")]
+    [SerializeField] float customSkinBulletMaxWorldUnits = 0.42f;
+    [Tooltip("Longest edge in world units for custom pickup images. 0 = PPU only.")]
+    [SerializeField] float customSkinPickupMaxWorldUnits = 1.05f;
     [Tooltip("If set, overrides StreamingAssets/Skins and procedural art. Absolute path, StreamingAssets path, or Resources key.")]
     [SerializeField] string playerShipImagePath = "";
     [SerializeField] string enemyShipImagePath = "";
@@ -106,7 +138,7 @@ public class GameBootstrap : MonoBehaviour
     SpriteRenderer _mainBackdropSr;
     Text _waveText;
     Text _stageBannerText;
-    int _waveNumber = 1;
+    int _waveNumber;
     float _stageTimeRemaining;
     bool _waveIntermission;
     float _intermissionTimer;
@@ -154,6 +186,7 @@ public class GameBootstrap : MonoBehaviour
         BuildHud();
         _sessionHighScore = PlayerPrefs.GetInt(PrefHighScore, 0);
         _sessionBestWave = PlayerPrefs.GetInt(PrefBestWave, 1);
+        _waveNumber = Mathf.Max(1, PlayerPrefs.GetInt(PrefNextWave, 1));
         _stageTimeRemaining = stageDurationSeconds;
         if (audioHub == null)
             audioHub = GetComponent<GameplayAudioHub>();
@@ -208,12 +241,24 @@ public class GameBootstrap : MonoBehaviour
         atomBombDamage = Mathf.Max(1, atomBombDamage);
         gameOverReturnDelaySeconds = Mathf.Max(0f, gameOverReturnDelaySeconds);
         customSpritePixelsPerUnit = Mathf.Max(1f, customSpritePixelsPerUnit);
+        customSkinPlayerMaxWorldUnits = Mathf.Max(0f, customSkinPlayerMaxWorldUnits);
+        customSkinEnemyMaxWorldUnits = Mathf.Max(0f, customSkinEnemyMaxWorldUnits);
+        customSkinAsteroidMaxWorldUnits = Mathf.Max(0f, customSkinAsteroidMaxWorldUnits);
+        customSkinBulletMaxWorldUnits = Mathf.Max(0f, customSkinBulletMaxWorldUnits);
+        customSkinPickupMaxWorldUnits = Mathf.Max(0f, customSkinPickupMaxWorldUnits);
         stageDurationSeconds = Mathf.Max(8f, stageDurationSeconds);
         waveIntermissionSeconds = Mathf.Max(0f, waveIntermissionSeconds);
         bossEveryNWaves = Mathf.Max(0, bossEveryNWaves);
         bossHpMultiplier = Mathf.Max(1f, bossHpMultiplier);
         scoutSpawnWeightStart = Mathf.Clamp01(scoutSpawnWeightStart);
         scoutSpawnWeightPerWave = Mathf.Max(0f, scoutSpawnWeightPerWave);
+        firstStagesAsteroidFocus = Mathf.Max(0, firstStagesAsteroidFocus);
+        earlyWaveShipSpawnChance = Mathf.Clamp01(earlyWaveShipSpawnChance);
+        asteroidFocusEaseOutWaves = Mathf.Max(0, asteroidFocusEaseOutWaves);
+        earlyAsteroidHpCapScale = Mathf.Clamp(earlyAsteroidHpCapScale, 0.35f, 1f);
+        earlyAsteroidSpeedMultiplier = Mathf.Clamp(earlyAsteroidSpeedMultiplier, 0.4f, 1f);
+        parallaxFarScrollSpeed = Mathf.Max(0f, parallaxFarScrollSpeed);
+        parallaxNearScrollSpeed = Mathf.Max(0f, parallaxNearScrollSpeed);
         shipBottomMarginWorld = Mathf.Max(0f, shipBottomMarginWorld);
     }
 
@@ -222,19 +267,25 @@ public class GameBootstrap : MonoBehaviour
         float p = customSpritePixelsPerUnit;
 
         _playerShipSprite = RuntimeSpriteLoader.LoadSpriteFlexible(
-            GameSkinResolver.ResolvePathForLoader(playerShipImagePath, GameSkinSlot.Player), p);
+            GameSkinResolver.ResolvePathForLoader(playerShipImagePath, GameSkinSlot.Player),
+            p,
+            customSkinPlayerMaxWorldUnits);
         if (_playerShipSprite == null)
             _playerShipSprite = GameplaySprites.PlayerShip();
 
         _enemyScoutSprite = RuntimeSpriteLoader.LoadSpriteFlexible(
-            GameSkinResolver.ResolvePathForLoader(enemyShipImagePath, GameSkinSlot.EnemyShip), p);
+            GameSkinResolver.ResolvePathForLoader(enemyShipImagePath, GameSkinSlot.EnemyShip),
+            p,
+            customSkinEnemyMaxWorldUnits);
         if (_enemyScoutSprite == null)
             _enemyScoutSprite = GameplaySprites.EnemyScoutShip();
 
         const int asteroidVariantCount = 12;
         _asteroidSprites = new Sprite[asteroidVariantCount];
         var asteroidCustom = RuntimeSpriteLoader.LoadSpriteFlexible(
-            GameSkinResolver.ResolvePathForLoader(asteroidImagePath, GameSkinSlot.Asteroid), p);
+            GameSkinResolver.ResolvePathForLoader(asteroidImagePath, GameSkinSlot.Asteroid),
+            p,
+            customSkinAsteroidMaxWorldUnits);
         if (asteroidCustom != null)
         {
             for (int i = 0; i < asteroidVariantCount; i++)
@@ -247,16 +298,24 @@ public class GameBootstrap : MonoBehaviour
         }
 
         _pixelSprite = RuntimeSpriteLoader.LoadSpriteFlexible(
-            GameSkinResolver.ResolvePathForLoader(bulletImagePath, GameSkinSlot.Bullet), p);
+            GameSkinResolver.ResolvePathForLoader(bulletImagePath, GameSkinSlot.Bullet),
+            p,
+            customSkinBulletMaxWorldUnits);
         if (_pixelSprite == null)
             _pixelSprite = BuildPixelSprite();
 
         _pickupHealthSprite = RuntimeSpriteLoader.LoadSpriteFlexible(
-            GameSkinResolver.ResolvePathForLoader(pickupHealthImagePath, GameSkinSlot.PickupHealth), p);
+            GameSkinResolver.ResolvePathForLoader(pickupHealthImagePath, GameSkinSlot.PickupHealth),
+            p,
+            customSkinPickupMaxWorldUnits);
         _pickupPositiveSprite = RuntimeSpriteLoader.LoadSpriteFlexible(
-            GameSkinResolver.ResolvePathForLoader(pickupPositiveImagePath, GameSkinSlot.PickupPositive), p);
+            GameSkinResolver.ResolvePathForLoader(pickupPositiveImagePath, GameSkinSlot.PickupPositive),
+            p,
+            customSkinPickupMaxWorldUnits);
         _pickupNegativeSprite = RuntimeSpriteLoader.LoadSpriteFlexible(
-            GameSkinResolver.ResolvePathForLoader(pickupNegativeImagePath, GameSkinSlot.PickupNegative), p);
+            GameSkinResolver.ResolvePathForLoader(pickupNegativeImagePath, GameSkinSlot.PickupNegative),
+            p,
+            customSkinPickupMaxWorldUnits);
 
         _missileSprite = GameplaySprites.EnemyMissile();
     }
@@ -290,7 +349,7 @@ public class GameBootstrap : MonoBehaviour
         SpaceBackdrop.SetupRendererForOrthoCamera(sr, _cam);
         // Parallax star tiles only when not using a successfully loaded custom background (keeps art clean).
         if (!loadedCustomBackground)
-            SpaceBackdrop.AddScrollingStarLayers(go, _cam, Color.white);
+            SpaceBackdrop.AddScrollingStarLayers(go, _cam, Color.white, parallaxFarScrollSpeed, parallaxNearScrollSpeed);
     }
 
     Transform BuildShip()
@@ -535,6 +594,8 @@ public class GameBootstrap : MonoBehaviour
         float speed = isStrong
             ? Random.Range(strongEnemySpeedMin, strongEnemySpeedMax)
             : Random.Range(weakEnemySpeedMin, weakEnemySpeedMax);
+        if (isStrong && firstStagesAsteroidFocus > 0 && _waveNumber <= firstStagesAsteroidFocus)
+            speed *= earlyAsteroidSpeedMultiplier;
         float driftX = isStrong ? 0f : Random.Range(-weakEnemyDiagonalDrift, weakEnemyDiagonalDrift);
 
         var go = new GameObject(isStrong ? "Asteroid" : "EnemyShip");
@@ -933,6 +994,7 @@ public class GameBootstrap : MonoBehaviour
             PlayerPrefs.SetInt(PrefHighScore, _score);
         int prevWave = PlayerPrefs.GetInt(PrefBestWave, 1);
         PlayerPrefs.SetInt(PrefBestWave, Mathf.Max(prevWave, _waveNumber));
+        PlayerPrefs.SetInt(PrefNextWave, _waveNumber);
         PlayerPrefs.Save();
 
         if (_ship != null)
@@ -1191,6 +1253,7 @@ public class GameBootstrap : MonoBehaviour
 
         int prevBestWave = PlayerPrefs.GetInt(PrefBestWave, 1);
         PlayerPrefs.SetInt(PrefBestWave, Mathf.Max(prevBestWave, _waveNumber + 1));
+        PlayerPrefs.SetInt(PrefNextWave, _waveNumber + 1);
         int prevHi = PlayerPrefs.GetInt(PrefHighScore, 0);
         if (_score > prevHi)
             PlayerPrefs.SetInt(PrefHighScore, _score);
@@ -1238,16 +1301,37 @@ public class GameBootstrap : MonoBehaviour
     float GetSpawnIntervalForWave()
     {
         float w = Mathf.Max(0, _waveNumber - 1);
-        return Mathf.Max(0.36f, enemySpawnInterval - w * 0.034f);
+        return Mathf.Max(0.42f, enemySpawnInterval - w * 0.028f);
+    }
+
+    float ScoutSpawnChanceForWave()
+    {
+        float w = Mathf.Max(0, _waveNumber - 1);
+        float curve = Mathf.Clamp01(scoutSpawnWeightStart - w * scoutSpawnWeightPerWave);
+
+        if (firstStagesAsteroidFocus <= 0)
+            return curve;
+
+        if (_waveNumber <= firstStagesAsteroidFocus)
+            return earlyWaveShipSpawnChance;
+
+        int blendEnd = firstStagesAsteroidFocus + Mathf.Max(1, asteroidFocusEaseOutWaves);
+        if (_waveNumber >= blendEnd)
+            return curve;
+
+        float t = Mathf.InverseLerp(firstStagesAsteroidFocus, blendEnd, _waveNumber);
+        return Mathf.Lerp(earlyWaveShipSpawnChance, curve, Mathf.Clamp01(t));
     }
 
     int RollEnemyHpForCurrentWave()
     {
         float w = Mathf.Max(0, _waveNumber - 1);
         int cap = Mathf.RoundToInt(Mathf.Min(enemyHpMax, enemyHpMin + 4 + w * 5));
+        if (firstStagesAsteroidFocus > 0 && _waveNumber <= firstStagesAsteroidFocus)
+            cap = Mathf.Max(strongEnemyHpThreshold, Mathf.RoundToInt(cap * earlyAsteroidHpCapScale));
         int hi = Mathf.Max(enemyHpMin, cap);
 
-        float scoutChance = Mathf.Clamp01(scoutSpawnWeightStart - w * scoutSpawnWeightPerWave);
+        float scoutChance = ScoutSpawnChanceForWave();
         bool scout = strongEnemyHpThreshold > enemyHpMin && Random.value < scoutChance;
 
         if (scout)
