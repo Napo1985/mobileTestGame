@@ -1,7 +1,9 @@
 using UnityEngine;
 
 /// <summary>
-/// Simple trails and one-shot particle bursts (no prefabs required).
+/// Trails, one-shot particle bursts, shockwave rings, and screen-shake helpers.
+/// All methods are static — the ShockwaveAnimator MonoBehaviour drives
+/// per-frame ring expansion autonomously.
 /// </summary>
 public static class GameplayVfx
 {
@@ -16,10 +18,11 @@ public static class GameplayVfx
                 var sh = Shader.Find("Sprites/Default");
                 _spriteMat = sh != null ? new Material(sh) : new Material(Shader.Find("Unlit/Color"));
             }
-
             return _spriteMat;
         }
     }
+
+    // ── Trail ─────────────────────────────────────────────────────────
 
     public static void SetupFastTrail(GameObject go, Color color, float width, float duration)
     {
@@ -34,29 +37,44 @@ public static class GameplayVfx
         tr.minVertexDistance = 0.02f;
     }
 
+    // ── Explosion ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Spawns a two-layer explosion: a tight core burst + a wider debris ring.
+    /// Large explosions (scale >= 1) also spawn a shockwave ring.
+    /// </summary>
     public static void SpawnExplosion(Vector3 worldPosition, Color coreColor, float scale = 1f)
     {
-        var go = new GameObject("Explosion");
-        go.transform.position = worldPosition;
+        SpawnCoreBurst(worldPosition, coreColor, scale);
+        SpawnDebrisRing(worldPosition, scale);
+
+        if (scale >= 0.85f)
+            SpawnShockwave(worldPosition, scale * 2.8f);
+    }
+
+    static void SpawnCoreBurst(Vector3 pos, Color coreColor, float scale)
+    {
+        var go = new GameObject("Explosion_Core");
+        go.transform.position = pos;
         go.SetActive(false);
 
         var ps = go.AddComponent<ParticleSystem>();
         var main = ps.main;
         main.playOnAwake = false;
         main.loop = false;
-        main.duration = 0.28f;
-        main.startLifetime = 0.45f;
-        main.startSpeed = new ParticleSystem.MinMaxCurve(2f * scale, 5.5f * scale);
-        main.startSize = new ParticleSystem.MinMaxCurve(0.06f * scale, 0.2f * scale);
+        main.duration = 0.3f;
+        main.startLifetime = new ParticleSystem.MinMaxCurve(0.35f, 0.55f);
+        main.startSpeed = new ParticleSystem.MinMaxCurve(2.5f * scale, 6f * scale);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.07f * scale, 0.22f * scale);
         main.startColor = new ParticleSystem.MinMaxGradient(
             coreColor,
             new Color(1f, 0.45f, 0.1f, 1f));
-        main.gravityModifier = 0.15f;
+        main.gravityModifier = 0.18f;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
 
         var emission = ps.emission;
         emission.rateOverTime = 0f;
-        emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 32, 42) });
+        emission.SetBursts(new[] { new ParticleSystem.Burst(0f, (short)(30 * scale + 12), (short)(42 * scale + 18)) });
 
         var shape = ps.shape;
         shape.shapeType = ParticleSystemShapeType.Sphere;
@@ -67,6 +85,119 @@ public static class GameplayVfx
 
         go.SetActive(true);
         ps.Play();
-        Object.Destroy(go, 1.2f);
+        Object.Destroy(go, 1.4f);
+    }
+
+    static void SpawnDebrisRing(Vector3 pos, float scale)
+    {
+        var go = new GameObject("Explosion_Debris");
+        go.transform.position = pos;
+        go.SetActive(false);
+
+        var ps = go.AddComponent<ParticleSystem>();
+        var main = ps.main;
+        main.playOnAwake = false;
+        main.loop = false;
+        main.duration = 0.1f;
+        main.startLifetime = new ParticleSystem.MinMaxCurve(0.6f * scale, 1.1f * scale);
+        main.startSpeed = new ParticleSystem.MinMaxCurve(1.5f * scale, 4f * scale);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.04f * scale, 0.11f * scale);
+        main.startColor = new ParticleSystem.MinMaxGradient(
+            new Color(0.9f, 0.75f, 0.4f, 1f),
+            new Color(0.55f, 0.3f, 0.15f, 0.7f));
+        main.gravityModifier = 0.55f;
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+
+        var emission = ps.emission;
+        emission.rateOverTime = 0f;
+        emission.SetBursts(new[] { new ParticleSystem.Burst(0f, (short)(16 * scale + 6), (short)(28 * scale + 10)) });
+
+        // Wide cone so debris flies outward from the ring
+        var shape = ps.shape;
+        shape.shapeType = ParticleSystemShapeType.Circle;
+        shape.radius = 0.18f * scale;
+        shape.radiusThickness = 1f;
+
+        var vel = ps.velocityOverLifetime;
+        vel.enabled = true;
+        vel.space = ParticleSystemSimulationSpace.Local;
+
+        var pr = go.GetComponent<ParticleSystemRenderer>();
+        pr.material = SpriteMat;
+
+        go.SetActive(true);
+        ps.Play();
+        Object.Destroy(go, 2.0f);
+    }
+
+    // ── Shockwave ring ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Spawns an expanding LineRenderer circle that fades over <paramref name="duration"/> seconds.
+    /// </summary>
+    public static void SpawnShockwave(Vector3 worldPosition, float maxRadius, float duration = 0.42f)
+    {
+        var go = new GameObject("Shockwave");
+        go.transform.position = worldPosition;
+
+        var lr = go.AddComponent<LineRenderer>();
+        lr.material = SpriteMat;
+        lr.useWorldSpace = false;
+        lr.loop = true;
+        lr.startWidth = 0.09f;
+        lr.endWidth = 0.05f;
+        lr.positionCount = ShockwaveAnimator.Segments;
+
+        var anim = go.AddComponent<ShockwaveAnimator>();
+        anim.Init(lr, maxRadius, duration);
+    }
+}
+
+/// <summary>
+/// Drives the per-frame expansion and fade of a shockwave LineRenderer circle.
+/// Kept in this file to avoid a standalone one-method file.
+/// </summary>
+public class ShockwaveAnimator : MonoBehaviour
+{
+    public const int Segments = 40;
+
+    LineRenderer _lr;
+    float _maxRadius;
+    float _duration;
+    float _elapsed;
+
+    public void Init(LineRenderer lr, float maxRadius, float duration)
+    {
+        _lr = lr;
+        _maxRadius = maxRadius;
+        _duration = duration;
+        _elapsed = 0f;
+        UpdateRing(0f, 1f);
+    }
+
+    void Update()
+    {
+        _elapsed += Time.deltaTime;
+        float t = Mathf.Clamp01(_elapsed / _duration);
+        float alpha = 1f - t;
+        UpdateRing(_maxRadius * t, alpha);
+
+        if (t >= 1f)
+            Destroy(gameObject);
+    }
+
+    void UpdateRing(float radius, float alpha)
+    {
+        _lr.startColor = new Color(1f, 0.72f, 0.3f, alpha * 0.92f);
+        _lr.endColor   = new Color(1f, 0.5f,  0.1f, 0f);
+
+        for (int i = 0; i < Segments; i++)
+        {
+            float angle = i / (float)Segments * Mathf.PI * 2f;
+            _lr.SetPosition(i, new Vector3(
+                Mathf.Cos(angle) * radius,
+                Mathf.Sin(angle) * radius,
+                0f));
+        }
     }
 }

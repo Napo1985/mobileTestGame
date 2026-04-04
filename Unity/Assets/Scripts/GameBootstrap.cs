@@ -1,5 +1,7 @@
+using System;
 using System.Collections;
 using UnityEngine;
+using Random = UnityEngine.Random;
 using UnityEngine.Rendering;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
@@ -78,6 +80,21 @@ public class GameBootstrap : MonoBehaviour
     Button _atomBombButton;
     bool _gameOver;
 
+    // ── Animation state ──────────────────────────────────────────────
+    SpriteRenderer _engineGlowLeft;
+    SpriteRenderer _engineGlowRight;
+    float _shipTiltAngle;
+    float _shipPrevX;
+
+    // ── Screen shake ─────────────────────────────────────────────────
+    Vector3 _cameraBasePos;
+    float _shakeIntensity;
+    float _shakeTimeRemaining;
+    float _shakeDuration;
+
+    // ── Missile sprite ───────────────────────────────────────────────
+    Sprite _missileSprite;
+
     void Awake()
     {
         NormalizeGameplayConfig();
@@ -87,6 +104,7 @@ public class GameBootstrap : MonoBehaviour
         _cam.transform.position = new Vector3(0f, 0f, -10f);
         _cam.clearFlags = CameraClearFlags.SolidColor;
         _cam.backgroundColor = new Color(0.02f, 0.025f, 0.07f, 1f);
+        _cameraBasePos = _cam.transform.position;
 
         BuildSpaceBackdrop();
 
@@ -99,6 +117,7 @@ public class GameBootstrap : MonoBehaviour
 
         _playerHp = playerMaxHp;
         _ship = BuildShip();
+        _shipPrevX = _ship.position.x;
         BuildHud();
         UpdateHud();
     }
@@ -191,6 +210,8 @@ public class GameBootstrap : MonoBehaviour
             GameSkinResolver.ResolvePathForLoader(pickupPositiveImagePath, GameSkinSlot.PickupPositive), p);
         _pickupNegativeSprite = RuntimeSpriteLoader.LoadSpriteFlexible(
             GameSkinResolver.ResolvePathForLoader(pickupNegativeImagePath, GameSkinSlot.PickupNegative), p);
+
+        _missileSprite = GameplaySprites.EnemyMissile();
     }
 
     static Sprite BuildPixelSprite()
@@ -229,19 +250,95 @@ public class GameBootstrap : MonoBehaviour
         go.transform.position = new Vector3(0f, -5.5f, 0f);
         SpriteCollider2DUtil.AddPolygonFromSprite(go, _playerShipSprite, false);
         go.AddComponent<PlayerShipMarker>();
+
+        // Pulsing engine exhausts — local offsets place glows at thruster positions
+        _engineGlowLeft  = BuildEngineGlowChild(go, new Vector3(-0.19f, -0.48f, -0.1f));
+        _engineGlowRight = BuildEngineGlowChild(go, new Vector3( 0.19f, -0.48f, -0.1f));
+
         return go.transform;
+    }
+
+    SpriteRenderer BuildEngineGlowChild(GameObject parent, Vector3 localOffset)
+    {
+        var go = new GameObject("EngineGlow");
+        go.transform.SetParent(parent.transform, false);
+        go.transform.localPosition = localOffset;
+        go.transform.localScale = Vector3.one * 0.55f;
+        var sr = go.AddComponent<SpriteRenderer>();
+        sr.sprite = GameplaySprites.EngineGlow();
+        sr.sortingOrder = -1;
+        sr.color = new Color(0.2f, 0.85f, 1f, 0.8f);
+        return sr;
     }
 
     void Update()
     {
+        UpdateScreenShake();
+
         if (_gameOver)
             return;
         if (_playerHp <= 0)
             return;
 
+        // Right-click (or two-finger tap on mobile) triggers the Atom Bomb
+        if (Input.GetMouseButtonDown(1))
+            UseAtomBomb();
+
         UpdateShipFromPointer();
+        UpdateShipAnimation();
         UpdateFiring();
         UpdateEnemySpawning();
+    }
+
+    // ── Ship animation ────────────────────────────────────────────────
+
+    void UpdateShipAnimation()
+    {
+        if (_ship == null) return;
+
+        // Banking tilt: rotate Z based on horizontal velocity
+        float horizVel = (_ship.position.x - _shipPrevX) / Mathf.Max(Time.deltaTime, 0.001f);
+        _shipPrevX = _ship.position.x;
+        float targetTilt = Mathf.Clamp(-horizVel * 2.6f, -22f, 22f);
+        _shipTiltAngle = Mathf.Lerp(_shipTiltAngle, targetTilt, Time.deltaTime * 9f);
+        _ship.rotation = Quaternion.Euler(0f, 0f, _shipTiltAngle);
+
+        // Engine glow pulse — fast sine gives a "firing" feel
+        float pulse = 0.68f + 0.32f * Mathf.Sin(Time.time * 22f);
+        Color glowColor = new Color(0.2f, 0.85f, 1f, pulse);
+        if (_engineGlowLeft  != null) _engineGlowLeft.color  = glowColor;
+        if (_engineGlowRight != null) _engineGlowRight.color = glowColor;
+    }
+
+    // ── Screen shake ──────────────────────────────────────────────────
+
+    void TriggerScreenShake(float intensity, float duration)
+    {
+        // Take the stronger of competing shakes; don't interrupt a bigger one
+        if (intensity >= _shakeIntensity || _shakeTimeRemaining <= 0f)
+        {
+            _shakeIntensity = intensity;
+            _shakeTimeRemaining = duration;
+            _shakeDuration = Mathf.Max(0.01f, duration);
+        }
+    }
+
+    void UpdateScreenShake()
+    {
+        if (_shakeTimeRemaining <= 0f) return;
+
+        _shakeTimeRemaining -= Time.deltaTime;
+        if (_shakeTimeRemaining <= 0f)
+        {
+            _cam.transform.position = _cameraBasePos;
+            _shakeIntensity = 0f;
+            return;
+        }
+
+        float decay = _shakeTimeRemaining / _shakeDuration;
+        float ox = Random.Range(-1f, 1f) * _shakeIntensity * decay;
+        float oy = Random.Range(-1f, 1f) * _shakeIntensity * decay;
+        _cam.transform.position = _cameraBasePos + new Vector3(ox, oy, 0f);
     }
 
     void UpdateShipFromPointer()
@@ -346,6 +443,15 @@ public class GameBootstrap : MonoBehaviour
         var bullet = go.AddComponent<Bullet>();
         bullet.Configure(CurrentBulletSpeed(), _cam.orthographicSize + 6f, CurrentBulletDamage());
 
+        // #region agent log
+        AgentDebugLog.Write(
+            "H1",
+            "GameBootstrap.cs:SpawnBullet",
+            "bullet_spawned",
+            "{\"useFullKinematicContacts\":" + (rb.useFullKinematicContacts ? "true" : "false") + ",\"bodyType\":" +
+            AgentDebugLog.J(rb.bodyType.ToString()) + "}");
+        // #endregion
+
         GameplayVfx.SetupFastTrail(go, new Color(1f, 0.9f, 0.35f, 0.65f), 0.12f * bulletScale * elementScaleMultiplier, 0.12f);
     }
 
@@ -399,7 +505,22 @@ public class GameBootstrap : MonoBehaviour
         SpriteCollider2DUtil.AddPolygonFromSprite(go, sr.sprite, true);
 
         var enemy = go.AddComponent<Enemy>();
-        enemy.Configure(hp, speed, driftX, -_cam.orthographicSize - 2f, OnEnemyKilled, OnPlayerHitByEnemy, spin);
+        enemy.Configure(
+            hp, speed, driftX, -_cam.orthographicSize - 2f,
+            OnEnemyKilled, OnPlayerHitByEnemy, spin,
+            isStrong ? EnemyType.Asteroid : EnemyType.Ship,
+            isStrong ? null : _ship,
+            isStrong ? null : (Action<Vector3>)SpawnEnemyMissile,
+            isStrong ? (Action<Vector3, float>)HandleAoeExplosion : null);
+
+        // #region agent log
+        AgentDebugLog.Write(
+            "H1",
+            "GameBootstrap.cs:SpawnEnemy",
+            "enemy_spawned",
+            "{\"isStrong\":" + (isStrong ? "true" : "false") + ",\"useFullKinematicContacts\":" +
+            (rb.useFullKinematicContacts ? "true" : "false") + ",\"bodyType\":" + AgentDebugLog.J(rb.bodyType.ToString()) + "}");
+        // #endregion
 
         if (!isStrong)
             GameplayVfx.SetupFastTrail(go, new Color(1f, 0.4f, 0.45f, 0.45f), 0.22f * size * elementScaleMultiplier, 0.18f);
@@ -407,8 +528,11 @@ public class GameBootstrap : MonoBehaviour
 
     void OnEnemyKilled(int maxHp, Vector3 atPosition)
     {
-        float boom = Mathf.Lerp(0.55f, 1.35f, Mathf.InverseLerp(enemyHpMin, enemyHpMax, maxHp));
+        float boom = Mathf.Lerp(0.55f, 1.55f, Mathf.InverseLerp(enemyHpMin, enemyHpMax, maxHp));
         GameplayVfx.SpawnExplosion(atPosition, new Color(1f, 0.55f, 0.2f, 1f), boom);
+
+        // Shake proportional to enemy size
+        TriggerScreenShake(boom * 0.12f, boom * 0.3f);
 
         _score += PointsForHp(maxHp);
         TrySpawnDrop(atPosition);
@@ -649,6 +773,7 @@ public class GameBootstrap : MonoBehaviour
             return;
 
         ApplyDamageToPlayer(enemyTouchDamage);
+        TriggerScreenShake(0.22f, 0.3f);
     }
 
     void ApplyDamageToPlayer(int damage)
@@ -694,9 +819,85 @@ public class GameBootstrap : MonoBehaviour
         for (int i = 0; i < enemies.Length; i++)
         {
             Vector3 p = enemies[i].transform.position;
-            GameplayVfx.SpawnExplosion(p, new Color(0.7f, 0.35f, 1f, 1f), 0.85f);
+            GameplayVfx.SpawnExplosion(p, new Color(0.7f, 0.35f, 1f, 1f), 0.9f);
             enemies[i].ApplyDamage(atomBombDamage);
         }
+
+        // Big camera punch for Atom Bomb
+        if (enemies.Length > 0)
+            TriggerScreenShake(0.45f, 0.6f);
+    }
+
+    // ── Enemy missile spawning ────────────────────────────────────────
+
+    void SpawnEnemyMissile(Vector3 fromPosition)
+    {
+        if (_ship == null || _playerHp <= 0 || _gameOver)
+            return;
+
+        var go = new GameObject("EnemyMissile");
+        var sr = go.AddComponent<SpriteRenderer>();
+        sr.sprite = _missileSprite;
+        sr.color = Color.white;
+        float s = 0.65f * elementScaleMultiplier;
+        go.transform.position = fromPosition;
+        go.transform.localScale = new Vector3(s, s, 1f);
+
+        var rb = go.AddComponent<Rigidbody2D>();
+        rb.bodyType = RigidbodyType2D.Kinematic;
+        rb.gravityScale = 0f;
+        rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+
+        SpriteCollider2DUtil.AddPolygonFromSprite(go, sr.sprite, true);
+        GameplayVfx.SetupFastTrail(go, new Color(1f, 0.38f, 0.12f, 0.85f), 0.07f * s, 0.2f);
+
+        var missile = go.AddComponent<EnemyMissile>();
+        missile.Configure(
+            _ship,
+            8f,
+            Mathf.Max(1, enemyTouchDamage / 3),
+            -_cam.orthographicSize - 3f,
+            _cam.orthographicSize + 3f,
+            OnMissileHitPlayer);
+    }
+
+    void OnMissileHitPlayer(int damage)
+    {
+        if (_playerHp <= 0) return;
+        ApplyDamageToPlayer(damage);
+        TriggerScreenShake(0.14f, 0.22f);
+    }
+
+    // ── Asteroid AOE blast ────────────────────────────────────────────
+
+    void HandleAoeExplosion(Vector3 center, float radius)
+    {
+        int aoeDamage = Mathf.Max(1, Mathf.RoundToInt(atomBombDamage * 0.75f));
+
+        // Chain damage to all enemies within radius
+        var enemies = FindObjectsOfType<Enemy>();
+        foreach (var e in enemies)
+        {
+            if (Vector3.Distance(e.transform.position, center) <= radius)
+                e.ApplyDamage(aoeDamage);
+        }
+
+        // Player takes damage if inside inner 60 % of blast radius
+        if (_ship != null && _playerHp > 0)
+        {
+            float playerDist = Vector3.Distance(_ship.position, center);
+            float innerRadius = radius * 0.6f;
+            if (playerDist <= innerRadius)
+            {
+                float fraction = 1f - Mathf.Clamp01(playerDist / innerRadius);
+                ApplyDamageToPlayer(Mathf.RoundToInt(aoeDamage * fraction));
+            }
+        }
+
+        // Dedicated shockwave ring (the normal explosion from OnEnemyKilled
+        // already fires; this adds the larger AOE ring on top)
+        GameplayVfx.SpawnShockwave(center, radius, 0.55f);
+        TriggerScreenShake(Mathf.Clamp(0.22f * radius, 0.15f, 0.5f), 0.5f);
     }
 
     void TrySpawnDrop(Vector3 atPosition)

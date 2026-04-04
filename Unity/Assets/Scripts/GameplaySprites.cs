@@ -52,6 +52,87 @@ public static class GameplaySprites
         return CreateTexturedSprite(tex, w, h, new Vector2(0.5f, 0.42f), pixelsPerUnit);
     }
 
+    /// <summary>
+    /// Thin red rocket fired downward by enemy ships. Nose points toward local +Y so
+    /// the spawner can rotate the GameObject to match travel direction.
+    /// </summary>
+    public static Sprite EnemyMissile(float pixelsPerUnit = 32f)
+    {
+        int w = 10;
+        int h = 26;
+        var tex = NewTransparentTexture(w, h);
+
+        // Main body — tapered toward top (nose)
+        FillPolygon(tex, new[]
+        {
+            new Vector2(w / 2f,       h - 2f),   // nose tip
+            new Vector2(w / 2f - 2f, h - 7f),
+            new Vector2(w / 2f - 2f, 6f),
+            new Vector2(w / 2f + 2f, 6f),
+            new Vector2(w / 2f + 2f, h - 7f),
+        }, C(0.95f, 0.22f, 0.18f, 1f));
+
+        // Warhead cap — dark band behind nose
+        FillRect(tex, w / 2 - 2, h - 8, w / 2 + 2, h - 6, C(0.6f, 0.1f, 0.1f, 1f));
+
+        // Left fin
+        FillPolygon(tex, new[]
+        {
+            new Vector2(w / 2f - 2f, 8f),
+            new Vector2(1f,           4f),
+            new Vector2(w / 2f - 2f, 12f),
+        }, C(0.75f, 0.15f, 0.12f, 1f));
+
+        // Right fin
+        FillPolygon(tex, new[]
+        {
+            new Vector2(w / 2f + 2f, 8f),
+            new Vector2(w - 1f,      4f),
+            new Vector2(w / 2f + 2f, 12f),
+        }, C(0.75f, 0.15f, 0.12f, 1f));
+
+        // Engine glow at tail
+        FillEllipse(tex, w / 2f, 4f, 2.2f, 3.5f, C(1f, 0.65f, 0.15f, 0.95f));
+        FillEllipse(tex, w / 2f, 5f, 1.2f, 2f,   C(1f, 0.95f, 0.7f, 1f));
+
+        tex.Apply();
+        tex.filterMode = FilterMode.Point;
+        return CreateTexturedSprite(tex, w, h, new Vector2(0.5f, 0.5f), pixelsPerUnit);
+    }
+
+    /// <summary>
+    /// Small soft radial glow used for the player ship's engine exhausts.
+    /// Tinted at runtime to give the pulsing thruster effect.
+    /// </summary>
+    public static Sprite EngineGlow(float pixelsPerUnit = 28f)
+    {
+        int size = 20;
+        var tex = NewTransparentTexture(size, size);
+        float cx = size / 2f;
+        float cy = size / 2f;
+        float maxR = size / 2f - 0.5f;
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float dx = x - cx;
+                float dy = y - cy;
+                float d = Mathf.Sqrt(dx * dx + dy * dy);
+                if (d >= maxR) continue;
+
+                // Radial gradient: bright core fading to transparent edge
+                float t = 1f - (d / maxR);
+                float alpha = t * t;
+                tex.SetPixel(x, y, new Color(1f, 1f, 1f, alpha));
+            }
+        }
+
+        tex.Apply();
+        tex.filterMode = FilterMode.Bilinear;
+        return CreateTexturedSprite(tex, size, size, new Vector2(0.5f, 0.5f), pixelsPerUnit);
+    }
+
     public static Sprite EnemyScoutShip(float pixelsPerUnit = 38f)
     {
         int w = ShipSize;

@@ -22,6 +22,16 @@ public class Bullet : MonoBehaviour
 
     void OnTriggerEnter2D(Collider2D other)
     {
+        // #region agent log
+        var enemyProbe = other.GetComponent<Enemy>();
+        AgentDebugLog.Write(
+            "H1",
+            "Bullet.cs:OnTriggerEnter2D",
+            "trigger_enter",
+            "{\"other\":" + AgentDebugLog.J(other != null ? other.name : "null") +
+            ",\"hasEnemy\":" + (enemyProbe != null ? "true" : "false") + "}");
+        // #endregion
+
         var enemy = other.GetComponent<Enemy>();
         if (enemy == null)
             return;
