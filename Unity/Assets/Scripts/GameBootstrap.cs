@@ -23,9 +23,11 @@ public class GameBootstrap : MonoBehaviour
 
     [SerializeField] Camera gameplayCamera;
     [SerializeField] float baseFireInterval = 0.1f;
-    [SerializeField] float baseBulletSpeed = 19f;
+    [SerializeField] float baseBulletSpeed = 11.5f;
     [SerializeField] float shipMoveSmoothing = 18f;
-    [SerializeField] int baseBulletDamage = 9;
+    [SerializeField] int baseBulletDamage = 4;
+    [Tooltip("Multiplies bullet damage per wave after wave 1 (also stacks with cyan damage pickups).")]
+    [SerializeField] float bulletDamagePerWaveFactor = 0.068f;
     [SerializeField] float baseBulletScale = 1.05f;
     [SerializeField] int enemyHpMin = 2;
     [SerializeField] int enemyHpMax = 72;
@@ -39,7 +41,7 @@ public class GameBootstrap : MonoBehaviour
     [SerializeField] float weakEnemyDiagonalDrift = 0.82f;
     [SerializeField] int playerMaxHp = 100;
     [SerializeField] int enemyTouchDamage = 16;
-    [SerializeField] float playWidthScale = 0.7f;
+    [SerializeField] float playWidthScale = 0.48f;
     [Tooltip("Keeps the ship slightly above the bottom of the play clamp for thumb clearance.")]
     [SerializeField] float shipBottomMarginWorld = 0.85f;
     [SerializeField] float elementScaleMultiplier = 1.35f;
@@ -49,7 +51,7 @@ public class GameBootstrap : MonoBehaviour
     [SerializeField] float shotModifierStep = 0.12f;
     [SerializeField] float pickupFallSpeed = 2.5f;
     [SerializeField] float pickupVisualScale = 1.35f;
-    [Tooltip("HP subtracted from every enemy when Atom Bomb is pressed.")]
+    [Tooltip("Minimum fallback if no non-boss enemy HP has been tracked yet this wave.")]
     [SerializeField] int atomBombDamage = 42;
     [SerializeField] string mainMenuSceneName = "Main";
     [SerializeField] float gameOverReturnDelaySeconds = 2f;
@@ -59,9 +61,18 @@ public class GameBootstrap : MonoBehaviour
     [SerializeField] float stageDurationSeconds = 44f;
     [Tooltip("Pause spawning and show STAGE CLEAR between waves.")]
     [SerializeField] float waveIntermissionSeconds = 2.35f;
-    [Tooltip("0 = no bosses. Every Nth wave (after wave 1), spawns one tank asteroid at wave start.")]
-    [SerializeField] int bossEveryNWaves = 4;
-    [SerializeField] float bossHpMultiplier = 2.15f;
+    [Tooltip("Spawns a wave boss at the start of every stage (missiles + escort ships; scales with wave).")]
+    [SerializeField] bool spawnBossEachWave = true;
+    [SerializeField] int bossBaseHp = 48;
+    [SerializeField] int bossHpPerWave = 22;
+    [SerializeField] int bossMaxHpCap = 520;
+    [SerializeField] float bossHpMultiplier = 1f;
+    [SerializeField] float bossDescendSpeed = 0.38f;
+    [SerializeField] float bossDescendSpeedPerWave = 0.048f;
+    [SerializeField] float bossMissileIntervalWave1 = 2.85f;
+    [SerializeField] float bossMissileIntervalLate = 1.35f;
+    [SerializeField] float bossEscortIntervalWave1 = 5.6f;
+    [SerializeField] float bossEscortIntervalLate = 3.1f;
     [Tooltip("Scout (ship) spawn probability at wave 1 for the late-game curve; blended in after early asteroid focus.")]
     [SerializeField] float scoutSpawnWeightStart = 0.52f;
     [SerializeField] float scoutSpawnWeightPerWave = 0.026f;
@@ -132,6 +143,7 @@ public class GameBootstrap : MonoBehaviour
     Image _hpFillImage;
     Text _gameOverLabel;
     Button _atomBombButton;
+    Text _atomBombLabelText;
     bool _gameOver;
 
     GameObject _backdropRoot;
@@ -159,6 +171,9 @@ public class GameBootstrap : MonoBehaviour
 
     // ── Missile sprite ───────────────────────────────────────────────
     Sprite _missileSprite;
+
+    bool _atomBombAvailable = true;
+    int _strongestNonBossEnemyHpThisWave;
 
     void Awake()
     {
@@ -192,6 +207,7 @@ public class GameBootstrap : MonoBehaviour
             audioHub = GetComponent<GameplayAudioHub>();
         audioHub?.StartGameplayMusicIfConfigured();
         RefreshStagePresentation();
+        BeginWaveCombatState();
         UpdateHud();
     }
 
@@ -216,6 +232,7 @@ public class GameBootstrap : MonoBehaviour
     void NormalizeGameplayConfig()
     {
         baseBulletDamage = Mathf.Max(1, baseBulletDamage);
+        bulletDamagePerWaveFactor = Mathf.Max(0f, bulletDamagePerWaveFactor);
         baseBulletSpeed = Mathf.Max(0.1f, baseBulletSpeed);
         baseFireInterval = Mathf.Max(0.02f, baseFireInterval);
         baseBulletScale = Mathf.Max(0.2f, baseBulletScale);
@@ -248,8 +265,16 @@ public class GameBootstrap : MonoBehaviour
         customSkinPickupMaxWorldUnits = Mathf.Max(0f, customSkinPickupMaxWorldUnits);
         stageDurationSeconds = Mathf.Max(8f, stageDurationSeconds);
         waveIntermissionSeconds = Mathf.Max(0f, waveIntermissionSeconds);
-        bossEveryNWaves = Mathf.Max(0, bossEveryNWaves);
-        bossHpMultiplier = Mathf.Max(1f, bossHpMultiplier);
+        bossBaseHp = Mathf.Max(8, bossBaseHp);
+        bossHpPerWave = Mathf.Max(0, bossHpPerWave);
+        bossMaxHpCap = Mathf.Max(bossBaseHp, bossMaxHpCap);
+        bossHpMultiplier = Mathf.Max(0.25f, bossHpMultiplier);
+        bossDescendSpeed = Mathf.Clamp(bossDescendSpeed, 0.12f, 2.5f);
+        bossDescendSpeedPerWave = Mathf.Max(0f, bossDescendSpeedPerWave);
+        bossMissileIntervalWave1 = Mathf.Max(0.4f, bossMissileIntervalWave1);
+        bossMissileIntervalLate = Mathf.Max(0.35f, bossMissileIntervalLate);
+        bossEscortIntervalWave1 = Mathf.Max(0.6f, bossEscortIntervalWave1);
+        bossEscortIntervalLate = Mathf.Max(0.45f, bossEscortIntervalLate);
         scoutSpawnWeightStart = Mathf.Clamp01(scoutSpawnWeightStart);
         scoutSpawnWeightPerWave = Mathf.Max(0f, scoutSpawnWeightPerWave);
         firstStagesAsteroidFocus = Mathf.Max(0, firstStagesAsteroidFocus);
@@ -511,12 +536,21 @@ public class GameBootstrap : MonoBehaviour
         return _cam.ScreenToWorldPoint(new Vector3(screen.x, screen.y, 10f));
     }
 
-    Vector3 ClampToFrustum(Vector3 world)
+    /// <summary>Half-width (world X) where ship center can move; matches side padding.</summary>
+    float PlayAreaHalfWidthWorld()
     {
         float halfH = _cam.orthographicSize;
         float halfW = halfH * _cam.aspect * playWidthScale;
         const float pad = 0.6f;
-        world.x = Mathf.Clamp(world.x, -halfW + pad, halfW - pad);
+        return Mathf.Max(0.35f, halfW - pad);
+    }
+
+    Vector3 ClampToFrustum(Vector3 world)
+    {
+        float halfH = _cam.orthographicSize;
+        float halfX = PlayAreaHalfWidthWorld();
+        world.x = Mathf.Clamp(world.x, -halfX, halfX);
+        const float pad = 0.6f;
         float minY = -halfH + pad + shipBottomMarginWorld;
         world.y = Mathf.Clamp(world.y, minY, halfH - pad);
         return world;
@@ -615,8 +649,8 @@ public class GameBootstrap : MonoBehaviour
         }
 
         float spawnY = _cam.orthographicSize + 1.6f;
-        float halfW = _cam.orthographicSize * _cam.aspect * playWidthScale;
-        float spawnX = Random.Range(-halfW + 0.8f, halfW - 0.8f);
+        float halfX = PlayAreaHalfWidthWorld();
+        float spawnX = Random.Range(-halfX + 0.35f, halfX - 0.35f);
         go.transform.position = new Vector3(spawnX, spawnY, 0f);
 
         if (isStrong)
@@ -638,7 +672,15 @@ public class GameBootstrap : MonoBehaviour
             isStrong ? EnemyType.Asteroid : EnemyType.Ship,
             isStrong ? null : _ship,
             isStrong ? null : (Action<Vector3>)SpawnEnemyMissile,
-            isStrong ? (Action<Vector3, float>)HandleAoeExplosion : null);
+            isStrong ? (Action<Vector3, float>)HandleAoeExplosion : null,
+            null,
+            2.4f,
+            4.5f,
+            isStrong ? halfX : -1f,
+            enemyHpMin,
+            enemyHpMax);
+
+        RegisterStrongestNonBossHp(hp);
 
         // #region agent log
         AgentDebugLog.Write(
@@ -919,6 +961,7 @@ public class GameBootstrap : MonoBehaviour
         buttonText.fontSize = 24;
         buttonText.color = Color.white;
         buttonText.text = "Atom Bomb";
+        _atomBombLabelText = buttonText;
     }
 
     static Sprite BuildUiWhiteSprite()
@@ -957,6 +1000,8 @@ public class GameBootstrap : MonoBehaviour
                 ? Color.Lerp(mid, full, Mathf.InverseLerp(0.55f, 1f, t))
                 : Color.Lerp(low, mid, t > 0.001f ? Mathf.InverseLerp(0f, 0.55f, t) : 0f);
         }
+
+        RefreshAtomBombButtonState();
     }
 
     void OnPlayerHitByEnemy()
@@ -1021,20 +1066,24 @@ public class GameBootstrap : MonoBehaviour
 
     void UseAtomBomb()
     {
-        if (_playerHp <= 0)
+        if (_playerHp <= 0 || !_atomBombAvailable)
             return;
 
+        int dmg = GetAtomBombStrikeDamage();
         var enemies = FindObjectsOfType<Enemy>();
         for (int i = 0; i < enemies.Length; i++)
         {
             Vector3 p = enemies[i].transform.position;
             GameplayVfx.SpawnExplosion(p, new Color(0.7f, 0.35f, 1f, 1f), 0.9f);
-            enemies[i].ApplyDamage(atomBombDamage);
+            enemies[i].ApplyDamage(dmg);
         }
 
-        // Big camera punch for Atom Bomb
+        _atomBombAvailable = false;
+
         if (enemies.Length > 0)
             TriggerScreenShake(0.45f, 0.6f);
+
+        UpdateHud();
     }
 
     // ── Enemy missile spawning ────────────────────────────────────────
@@ -1281,7 +1330,7 @@ public class GameBootstrap : MonoBehaviour
         _waveNumber++;
         _stageTimeRemaining = stageDurationSeconds;
         RefreshStagePresentation();
-        TrySpawnBossForNewWave();
+        BeginWaveCombatState();
         UpdateHud();
     }
 
@@ -1344,39 +1393,79 @@ public class GameBootstrap : MonoBehaviour
         return Random.Range(low, hi + 1);
     }
 
-    void TrySpawnBossForNewWave()
+    float BulletDamageWaveMultiplier()
     {
-        if (bossEveryNWaves <= 0)
-            return;
-        if (_waveNumber <= 1)
-            return;
-        if (_waveNumber % bossEveryNWaves != 0)
-            return;
-
-        SpawnBossAsteroid();
+        return 1f + (_waveNumber - 1) * bulletDamagePerWaveFactor;
     }
 
-    void SpawnBossAsteroid()
+    int CurrentBulletDamage()
     {
-        int hp = Mathf.RoundToInt(Mathf.Lerp(strongEnemyHpThreshold, enemyHpMax, 0.82f) * bossHpMultiplier);
-        hp = Mathf.Clamp(hp, strongEnemyHpThreshold + 1, enemyHpMax * 3);
+        float waveMul = BulletDamageWaveMultiplier();
+        return Mathf.Max(1, Mathf.RoundToInt(baseBulletDamage * waveMul * _bulletDamageMultiplier));
+    }
 
-        float speed = strongEnemySpeedMin * 0.85f;
-        float driftX = 0f;
+    int GetAtomBombStrikeDamage()
+    {
+        return Mathf.Max(1, Mathf.Max(atomBombDamage, _strongestNonBossEnemyHpThisWave));
+    }
 
-        var go = new GameObject("BossAsteroid");
+    void RegisterStrongestNonBossHp(int hp)
+    {
+        if (hp > _strongestNonBossEnemyHpThisWave)
+            _strongestNonBossEnemyHpThisWave = hp;
+    }
+
+    int GetTheoreticalMaxNonBossHpForWave()
+    {
+        float w = Mathf.Max(0, _waveNumber - 1);
+        int cap = Mathf.RoundToInt(Mathf.Min(enemyHpMax, enemyHpMin + 4 + w * 5));
+        if (firstStagesAsteroidFocus > 0 && _waveNumber <= firstStagesAsteroidFocus)
+            cap = Mathf.Max(strongEnemyHpThreshold, Mathf.RoundToInt(cap * earlyAsteroidHpCapScale));
+        return Mathf.Max(enemyHpMin, cap);
+    }
+
+    void BeginWaveCombatState()
+    {
+        _atomBombAvailable = true;
+        _strongestNonBossEnemyHpThisWave = GetTheoreticalMaxNonBossHpForWave();
+
+        var existing = FindObjectsOfType<Enemy>();
+        for (int i = 0; i < existing.Length; i++)
+        {
+            if (existing[i] != null && existing[i].IsBoss)
+                Destroy(existing[i].gameObject);
+        }
+
+        if (spawnBossEachWave)
+            SpawnWaveBoss();
+    }
+
+    void SpawnWaveBoss()
+    {
+        if (_cam == null)
+            return;
+
+        float w = Mathf.Max(0, _waveNumber - 1);
+        int hp = Mathf.RoundToInt((bossBaseHp + w * bossHpPerWave) * bossHpMultiplier);
+        hp = Mathf.Clamp(hp, bossBaseHp, bossMaxHpCap);
+
+        float descend = Mathf.Min(1.15f, bossDescendSpeed + w * bossDescendSpeedPerWave);
+        float missileCd = Mathf.Lerp(bossMissileIntervalWave1, bossMissileIntervalLate, Mathf.Clamp01(w / 9f));
+        float escortCd = Mathf.Lerp(bossEscortIntervalWave1, bossEscortIntervalLate, Mathf.Clamp01(w / 9f));
+
+        var go = new GameObject("Boss");
         var sr = go.AddComponent<SpriteRenderer>();
-        int idx = (hp * 17 + _waveNumber * 31) % _asteroidSprites.Length;
+        int idx = (hp * 19 + _waveNumber * 37) % _asteroidSprites.Length;
         sr.sprite = _asteroidSprites[idx];
-        sr.color = new Color(1f, 0.82f, 0.95f, 1f);
+        sr.color = new Color(1f, 0.72f, 1f, 1f);
 
-        float spawnY = _cam.orthographicSize + 1.9f;
-        float halfW = _cam.orthographicSize * _cam.aspect * playWidthScale;
-        float spawnX = Random.Range(-halfW * 0.35f, halfW * 0.35f);
+        float spawnY = _cam.orthographicSize + 1.75f;
+        float halfX = PlayAreaHalfWidthWorld();
+        float spawnX = Random.Range(-halfX * 0.25f, halfX * 0.25f);
         go.transform.position = new Vector3(spawnX, spawnY, 0f);
-        GameplayVfx.SpawnAsteroidEntryPulse(new Vector3(spawnX, spawnY + 0.5f, 0f), 3.4f, 0.45f);
+        GameplayVfx.SpawnAsteroidEntryPulse(new Vector3(spawnX, spawnY + 0.45f, 0f), 2.8f, 0.4f);
 
-        float size = 2.15f * elementScaleMultiplier;
+        float size = 1.95f * elementScaleMultiplier;
         go.transform.localScale = new Vector3(size, size, 1f);
 
         var rb = go.AddComponent<Rigidbody2D>();
@@ -1387,17 +1476,82 @@ public class GameBootstrap : MonoBehaviour
 
         var enemy = go.AddComponent<Enemy>();
         enemy.Configure(
-            hp, speed, driftX, -_cam.orthographicSize - 2f,
-            OnEnemyKilled, OnPlayerHitByEnemy, Random.Range(28f, 52f) * (Random.value < 0.5f ? 1f : -1f),
-            EnemyType.Asteroid,
+            hp,
+            descend,
+            0f,
+            -_cam.orthographicSize - 2f,
+            OnEnemyKilled,
+            OnPlayerHitByEnemy,
+            Random.Range(22f, 40f) * (Random.value < 0.5f ? 1f : -1f),
+            EnemyType.Boss,
+            _ship,
+            SpawnEnemyMissile,
             null,
-            null,
-            (Action<Vector3, float>)HandleAoeExplosion);
+            SpawnBossEscortShip,
+            missileCd,
+            escortCd,
+            -1f,
+            enemyHpMin,
+            enemyHpMax);
     }
 
-    int CurrentBulletDamage()
+    void SpawnBossEscortShip(Vector3 fromPosition)
     {
-        return Mathf.Max(1, Mathf.RoundToInt(baseBulletDamage * _bulletDamageMultiplier));
+        if (_gameOver || _waveIntermission || _playerHp <= 0 || _cam == null)
+            return;
+
+        int hp = Mathf.Clamp(enemyHpMin + 1 + _waveNumber / 2, enemyHpMin, Mathf.Max(enemyHpMin + 1, strongEnemyHpThreshold - 1));
+        float speed = Random.Range(weakEnemySpeedMin, weakEnemySpeedMax) * 1.08f;
+        float driftX = Random.Range(-weakEnemyDiagonalDrift * 0.85f, weakEnemyDiagonalDrift * 0.85f);
+
+        var go = new GameObject("BossEscort");
+        var sr = go.AddComponent<SpriteRenderer>();
+        sr.sprite = _enemyScoutSprite;
+        sr.color = new Color(1f, 0.65f, 0.85f, 1f);
+
+        go.transform.position = fromPosition + new Vector3(Random.Range(-0.35f, 0.35f), -0.25f, 0f);
+
+        float rowSize = 0.82f * elementScaleMultiplier;
+        go.transform.localScale = new Vector3(rowSize, rowSize, 1f);
+
+        var rb = go.AddComponent<Rigidbody2D>();
+        rb.bodyType = RigidbodyType2D.Kinematic;
+        rb.gravityScale = 0f;
+
+        SpriteCollider2DUtil.AddPolygonFromSprite(go, sr.sprite, true);
+
+        var enemy = go.AddComponent<Enemy>();
+        enemy.Configure(
+            hp,
+            speed,
+            driftX,
+            -_cam.orthographicSize - 2f,
+            OnEnemyKilled,
+            OnPlayerHitByEnemy,
+            0f,
+            EnemyType.Ship,
+            _ship,
+            SpawnEnemyMissile,
+            null,
+            null,
+            2.4f,
+            4.5f,
+            -1f,
+            enemyHpMin,
+            enemyHpMax);
+
+        RegisterStrongestNonBossHp(hp);
+        GameplayVfx.SetupFastTrail(go, new Color(1f, 0.55f, 0.75f, 0.5f), 0.16f * rowSize, 0.16f);
+    }
+
+    void RefreshAtomBombButtonState()
+    {
+        if (_atomBombButton == null)
+            return;
+        bool can = _atomBombAvailable && _playerHp > 0 && !_gameOver;
+        _atomBombButton.interactable = can;
+        if (_atomBombLabelText != null)
+            _atomBombLabelText.text = _atomBombAvailable ? "Atom Bomb" : "Bomb used";
     }
 
     float CurrentBulletSpeed()
