@@ -61,8 +61,10 @@ public class GameBootstrap : MonoBehaviour
     [SerializeField] float stageDurationSeconds = 44f;
     [Tooltip("Pause spawning and show STAGE CLEAR between waves.")]
     [SerializeField] float waveIntermissionSeconds = 2.35f;
-    [Tooltip("Spawns a wave boss at the start of every stage (missiles + escort ships; scales with wave).")]
+    [Tooltip("Spawns one wave boss near the end of each stage (missiles + escort ships; scales with wave).")]
     [SerializeField] bool spawnBossEachWave = true;
+    [Tooltip("Boss enters when the stage countdown has this many seconds left (clamped below stage length).")]
+    [SerializeField] float bossStageEndLeadSeconds = 14f;
     [SerializeField] int bossBaseHp = 48;
     [SerializeField] int bossHpPerWave = 22;
     [SerializeField] int bossMaxHpCap = 520;
@@ -174,6 +176,7 @@ public class GameBootstrap : MonoBehaviour
 
     bool _atomBombAvailable = true;
     int _strongestNonBossEnemyHpThisWave;
+    bool _bossSpawnedForCurrentStage;
 
     void Awake()
     {
@@ -275,6 +278,7 @@ public class GameBootstrap : MonoBehaviour
         bossMissileIntervalLate = Mathf.Max(0.35f, bossMissileIntervalLate);
         bossEscortIntervalWave1 = Mathf.Max(0.6f, bossEscortIntervalWave1);
         bossEscortIntervalLate = Mathf.Max(0.45f, bossEscortIntervalLate);
+        bossStageEndLeadSeconds = Mathf.Clamp(bossStageEndLeadSeconds, 1.5f, 180f);
         scoutSpawnWeightStart = Mathf.Clamp01(scoutSpawnWeightStart);
         scoutSpawnWeightPerWave = Mathf.Max(0f, scoutSpawnWeightPerWave);
         firstStagesAsteroidFocus = Mathf.Max(0, firstStagesAsteroidFocus);
@@ -1290,7 +1294,24 @@ public class GameBootstrap : MonoBehaviour
         if (_stageTimeRemaining <= 0f)
             BeginWaveIntermission();
         else
+        {
+            MaybeSpawnStageEndBoss();
             UpdateHud();
+        }
+    }
+
+    void MaybeSpawnStageEndBoss()
+    {
+        if (!spawnBossEachWave || _bossSpawnedForCurrentStage || _gameOver)
+            return;
+        float triggerRemaining = Mathf.Clamp(
+            bossStageEndLeadSeconds,
+            1.5f,
+            Mathf.Max(1.5f, stageDurationSeconds - 0.35f));
+        if (_stageTimeRemaining > triggerRemaining)
+            return;
+        _bossSpawnedForCurrentStage = true;
+        SpawnWaveBoss();
     }
 
     void BeginWaveIntermission()
@@ -1428,6 +1449,7 @@ public class GameBootstrap : MonoBehaviour
     {
         _atomBombAvailable = true;
         _strongestNonBossEnemyHpThisWave = GetTheoreticalMaxNonBossHpForWave();
+        _bossSpawnedForCurrentStage = false;
 
         var existing = FindObjectsOfType<Enemy>();
         for (int i = 0; i < existing.Length; i++)
@@ -1435,9 +1457,6 @@ public class GameBootstrap : MonoBehaviour
             if (existing[i] != null && existing[i].IsBoss)
                 Destroy(existing[i].gameObject);
         }
-
-        if (spawnBossEachWave)
-            SpawnWaveBoss();
     }
 
     void SpawnWaveBoss()
